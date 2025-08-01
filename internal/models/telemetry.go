@@ -6,11 +6,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-type Location struct {
-	Lat float64 `bson:"lat" json:"lat"`
-	Lon float64 `bson:"lon" json:"lon"`
-}
-
 type Telemetry struct {
 	ID          primitive.ObjectID `bson:"_id,omitempty" json:"id"`
 	VehicleID   primitive.ObjectID `bson:"vehicle_id" json:"vehicle_id"`
