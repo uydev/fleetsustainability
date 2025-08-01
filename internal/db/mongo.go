@@ -8,6 +8,7 @@ import (
 
     "go.mongodb.org/mongo-driver/mongo"
     "go.mongodb.org/mongo-driver/mongo/options"
+    "github.com/ukydev/fleet-sustainability/internal/models"
 )
 
 func ConnectMongo() (*mongo.Client, error) {
@@ -29,4 +30,13 @@ func ConnectMongo() (*mongo.Client, error) {
         return nil, fmt.Errorf("mongo.Ping error: %w", err)
     }
     return client, nil
+}
+
+func InsertTelemetry(client *mongo.Client, telemetry models.Telemetry) error {
+    if client == nil {
+        return fmt.Errorf("mongo client is nil")
+    }
+    collection := client.Database("fleet").Collection("telemetry")
+    _, err := collection.InsertOne(context.Background(), telemetry)
+    return err
 }
