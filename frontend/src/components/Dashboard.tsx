@@ -4,198 +4,156 @@ import {
   Grid,
   Paper,
   Typography,
-  Card,
-  CardContent,
-  CircularProgress,
-  Alert,
   Container,
+  Tabs,
+  Tab,
 } from '@mui/material';
-import {
-  DirectionsCar as CarIcon,
-  BatteryChargingFull as EvIcon,
-  LocalGasStation as GasIcon,
-  TrendingUp as EmissionsIcon,
-} from '@mui/icons-material';
-import { Telemetry, FleetMetrics } from '../types';
-import apiService from '../services/api';
 import FleetMap from './FleetMap';
 import MetricsPanel from './MetricsPanel';
 import VehicleList from './VehicleList';
 import TimeRangeSelector from './TimeRangeSelector';
+import FleetManagement from './FleetManagement';
+import apiService from '../services/api';
+import { Telemetry, FleetMetrics, Vehicle } from '../types';
+
+interface TabPanelProps {
+  children?: React.ReactNode;
+  index: number;
+  value: number;
+}
+
+function TabPanel(props: TabPanelProps) {
+  const { children, value, index, ...other } = props;
+
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`simple-tabpanel-${index}`}
+      aria-labelledby={`simple-tab-${index}`}
+      {...other}
+    >
+      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
+    </div>
+  );
+}
 
 const Dashboard: React.FC = () => {
   const [telemetry, setTelemetry] = useState<Telemetry[]>([]);
-  const [metrics, setMetrics] = useState<FleetMetrics | null>(null);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [metrics, setMetrics] = useState<FleetMetrics>({
+    total_emissions: 0,
+    ev_percent: 0,
+    total_records: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [timeRange, setTimeRange] = useState<{ from?: string; to?: string }>({});
+  const [tabValue, setTabValue] = useState(0);
 
   const loadDashboardData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      setError(null);
-
-      const [telemetryData, metricsData] = await Promise.all([
-        apiService.getTelemetry(timeRange),
-        apiService.getFleetMetrics(timeRange),
+      const [telemetryData, metricsData, vehiclesData] = await Promise.all([
+        apiService.getTelemetry(),
+        apiService.getFleetMetrics(),
+        apiService.getVehicles(),
       ]);
-
       setTelemetry(telemetryData);
       setMetrics(metricsData);
+      setVehicles(vehiclesData);
     } catch (err) {
+      console.error('Error loading dashboard data:', err);
       setError('Failed to load dashboard data. Please try again.');
-      console.error('Dashboard load error:', err);
     } finally {
       setLoading(false);
     }
-  }, [timeRange]);
+  }, []);
 
   useEffect(() => {
     loadDashboardData();
   }, [loadDashboardData]);
 
-  const handleTimeRangeChange = (newTimeRange: { from?: string; to?: string }) => {
-    setTimeRange(newTimeRange);
+  const handleTimeRangeChange = useCallback(async (timeRange: { from?: string; to?: string }) => {
+    setLoading(true);
+    try {
+      const [telemetryData, metricsData] = await Promise.all([
+        apiService.getTelemetry(timeRange),
+        apiService.getFleetMetrics(timeRange),
+      ]);
+      setTelemetry(telemetryData);
+      setMetrics(metricsData);
+    } catch (err) {
+      console.error('Error loading filtered data:', err);
+      setError('Failed to load filtered data. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+    setTabValue(newValue);
   };
 
-  if (loading) {
+  if (loading && telemetry.length === 0) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
-        <CircularProgress size={60} />
-      </Box>
+      <Container maxWidth="xl">
+        <Typography>Loading dashboard...</Typography>
+      </Container>
     );
   }
 
   if (error) {
     return (
-      <Container maxWidth="lg" sx={{ mt: 4 }}>
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
-        </Alert>
+      <Container maxWidth="xl">
+        <Typography color="error">{error}</Typography>
       </Container>
     );
   }
 
+  const evCount = telemetry?.filter(t => t.battery_level !== undefined && t.battery_level !== null).length || 0;
+  const iceCount = telemetry?.filter(t => t.fuel_level !== undefined && t.fuel_level !== null).length || 0;
+
   return (
-    <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
-      <Typography variant="h3" component="h1" gutterBottom>
+    <Container maxWidth="xl" sx={{ py: 4 }}>
+      <Typography variant="h4" component="h1" gutterBottom>
         Fleet Sustainability Dashboard
       </Typography>
 
       <TimeRangeSelector onTimeRangeChange={handleTimeRangeChange} />
 
-      <Grid container spacing={3}>
-        {/* Fleet Map */}
-        <Grid item xs={12} lg={8}>
-          <Paper sx={{ p: 2, height: 400, display: 'flex', flexDirection: 'column' }}>
-            <Typography variant="h6" gutterBottom>
-              Fleet Overview
-            </Typography>
-            <Box sx={{ flex: 1, minHeight: 0 }}>
-              <FleetMap telemetry={telemetry} />
-            </Box>
-          </Paper>
-        </Grid>
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+        <Tabs value={tabValue} onChange={handleTabChange} aria-label="dashboard tabs">
+          <Tab label="Fleet Overview" />
+          <Tab label="Fleet Management" />
+        </Tabs>
+      </Box>
 
-        {/* Metrics Panel */}
-        <Grid item xs={12} lg={4}>
-          <Paper sx={{ p: 2, height: 400, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <Typography variant="h6" gutterBottom>
-              Fleet Metrics
-            </Typography>
-            <Box sx={{ flex: 1, overflow: 'auto' }}>
-              {metrics && <MetricsPanel metrics={metrics} />}
-            </Box>
-          </Paper>
-        </Grid>
-
-        {/* Quick Stats Cards */}
-        <Grid item xs={12}>
-          <Grid container spacing={2}>
-            <Grid item xs={12} sm={6} md={3}>
-              <Card>
-                <CardContent>
-                  <Box display="flex" alignItems="center">
-                    <CarIcon color="primary" sx={{ mr: 1 }} />
-                    <Box>
-                      <Typography variant="h6">
-                        {telemetry?.length || 0}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Total Vehicles
-                      </Typography>
-                    </Box>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
-
-            <Grid item xs={12} sm={6} md={3}>
-              <Card>
-                <CardContent>
-                  <Box display="flex" alignItems="center">
-                    <EvIcon color="success" sx={{ mr: 1 }} />
-                    <Box>
-                      <Typography variant="h6">
-                        {telemetry?.filter(t => t.battery_level !== undefined).length || 0}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Electric Vehicles
-                      </Typography>
-                    </Box>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
-
-            <Grid item xs={12} sm={6} md={3}>
-              <Card>
-                <CardContent>
-                  <Box display="flex" alignItems="center">
-                    <GasIcon color="warning" sx={{ mr: 1 }} />
-                    <Box>
-                      <Typography variant="h6">
-                        {telemetry?.filter(t => t.fuel_level !== undefined).length || 0}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        ICE Vehicles
-                      </Typography>
-                    </Box>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
-
-            <Grid item xs={12} sm={6} md={3}>
-              <Card>
-                <CardContent>
-                  <Box display="flex" alignItems="center">
-                    <EmissionsIcon color="error" sx={{ mr: 1 }} />
-                    <Box>
-                      <Typography variant="h6">
-                        {metrics?.total_emissions.toFixed(1) || '0'}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Total Emissions (kg)
-                      </Typography>
-                    </Box>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
+      <TabPanel value={tabValue} index={0}>
+        <Grid container spacing={3}>
+          <Grid item xs={12} lg={8}>
+            <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <Box sx={{ flex: 1, minHeight: 0 }}>
+                <FleetMap telemetry={telemetry} />
+              </Box>
+            </Paper>
+          </Grid>
+          <Grid item xs={12} lg={4}>
+            <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <Box sx={{ flex: 1, overflow: 'auto' }}>
+                <MetricsPanel metrics={metrics} />
+              </Box>
+            </Paper>
+          </Grid>
+          <Grid item xs={12}>
+            <VehicleList telemetry={telemetry} />
           </Grid>
         </Grid>
+      </TabPanel>
 
-        {/* Vehicle List */}
-        <Grid item xs={12}>
-          <Paper sx={{ p: 2 }}>
-            <Typography variant="h6" gutterBottom>
-              Vehicle Details
-            </Typography>
-            <VehicleList telemetry={telemetry} />
-          </Paper>
-        </Grid>
-      </Grid>
+      <TabPanel value={tabValue} index={1}>
+        <FleetManagement />
+      </TabPanel>
     </Container>
   );
 };

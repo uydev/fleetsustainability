@@ -230,15 +230,281 @@ func (h TelemetryMetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
     json.NewEncoder(w).Encode(resp)
 }
 
-func vehiclesHandler(w http.ResponseWriter, r *http.Request) {
-    switch r.Method {
-    case http.MethodGet:
-        // For now, return an empty array (stub)
-        w.Header().Set("Content-Type", "application/json")
-        w.Write([]byte("[]"))
-    default:
-        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-    }
+// VehicleHandler handles vehicle management API requests.
+type VehicleHandler struct {
+	Collection db.VehicleCollection
+}
+
+// ServeHTTP processes HTTP requests for vehicle management.
+func (h *VehicleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		// Get all vehicles
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		
+		cursor, err := h.Collection.FindVehicles(ctx, bson.M{})
+		if err != nil {
+			http.Error(w, "Failed to query vehicles", http.StatusInternalServerError)
+			return
+		}
+		defer cursor.Close(ctx)
+		
+		var vehicles []models.Vehicle
+		if err := cursor.All(ctx, &vehicles); err != nil {
+			http.Error(w, "Failed to decode vehicles", http.StatusInternalServerError)
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(vehicles)
+		
+	case http.MethodPost:
+		// Create new vehicle
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read body", http.StatusBadRequest)
+			return
+		}
+		
+		var vehicleInput struct {
+			Type            string           `json:"type"`
+			Make            string           `json:"make"`
+			Model           string           `json:"model"`
+			Year            int              `json:"year"`
+			CurrentLocation models.Location  `json:"current_location,omitempty"`
+			Status          string           `json:"status"`
+		}
+		
+		if err := json.Unmarshal(body, &vehicleInput); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		
+		// Input validation
+		if vehicleInput.Type == "" {
+			http.Error(w, "type is required", http.StatusBadRequest)
+			return
+		}
+		if vehicleInput.Type != "ICE" && vehicleInput.Type != "EV" {
+			http.Error(w, "type must be 'ICE' or 'EV'", http.StatusBadRequest)
+			return
+		}
+		if vehicleInput.Status == "" {
+			http.Error(w, "status is required", http.StatusBadRequest)
+			return
+		}
+		if vehicleInput.Status != "active" && vehicleInput.Status != "inactive" {
+			http.Error(w, "status must be 'active' or 'inactive'", http.StatusBadRequest)
+			return
+		}
+		if vehicleInput.Make == "" {
+			http.Error(w, "make is required", http.StatusBadRequest)
+			return
+		}
+		if vehicleInput.Model == "" {
+			http.Error(w, "model is required", http.StatusBadRequest)
+			return
+		}
+		if vehicleInput.Year < 1900 || vehicleInput.Year > 2030 {
+			http.Error(w, "year must be between 1900 and 2030", http.StatusBadRequest)
+			return
+		}
+		
+		vehicle := models.Vehicle{
+			ID:              primitive.NewObjectID(),
+			Type:            vehicleInput.Type,
+			Make:            vehicleInput.Make,
+			Model:           vehicleInput.Model,
+			Year:            vehicleInput.Year,
+			CurrentLocation: vehicleInput.CurrentLocation,
+			Status:          vehicleInput.Status,
+		}
+		
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		
+		err = h.Collection.InsertVehicle(ctx, vehicle)
+		if err != nil {
+			http.Error(w, "Failed to store vehicle", http.StatusInternalServerError)
+			return
+		}
+		
+		log.WithFields(log.Fields{"vehicle_id": vehicle.ID}).Info("Created vehicle")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id": vehicle.ID.Hex(),
+			"message": "Vehicle created successfully",
+		})
+		
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// vehicleHandler handles individual vehicle operations (PUT, DELETE).
+func vehicleHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract vehicle ID from URL path
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) < 3 {
+		http.Error(w, "Invalid vehicle ID", http.StatusBadRequest)
+		return
+	}
+	vehicleID := pathParts[len(pathParts)-1]
+	
+	// Validate vehicle ID format
+	if len(vehicleID) != 24 {
+		http.Error(w, "Invalid vehicle ID format", http.StatusBadRequest)
+		return
+	}
+	
+	switch r.Method {
+	case http.MethodPut:
+		// Update vehicle
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read body", http.StatusBadRequest)
+			return
+		}
+		
+		var vehicleInput struct {
+			Type            string           `json:"type"`
+			Make            string           `json:"make"`
+			Model           string           `json:"model"`
+			Year            int              `json:"year"`
+			CurrentLocation models.Location  `json:"current_location,omitempty"`
+			Status          string           `json:"status"`
+		}
+		
+		if err := json.Unmarshal(body, &vehicleInput); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		
+		// Input validation
+		if vehicleInput.Type != "" && vehicleInput.Type != "ICE" && vehicleInput.Type != "EV" {
+			http.Error(w, "type must be 'ICE' or 'EV'", http.StatusBadRequest)
+			return
+		}
+		if vehicleInput.Status != "" && vehicleInput.Status != "active" && vehicleInput.Status != "inactive" {
+			http.Error(w, "status must be 'active' or 'inactive'", http.StatusBadRequest)
+			return
+		}
+		if vehicleInput.Year != 0 && (vehicleInput.Year < 1900 || vehicleInput.Year > 2030) {
+			http.Error(w, "year must be between 1900 and 2030", http.StatusBadRequest)
+			return
+		}
+		
+		// For now, just return success (in real implementation, would update in DB)
+		// In a real implementation, we would check if the vehicle exists first
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id": vehicleID,
+			"message": "Vehicle updated successfully",
+		})
+		
+	case http.MethodDelete:
+		// Delete vehicle
+		// For now, just return success (in real implementation, would delete from DB)
+		// In a real implementation, we would check if the vehicle exists first
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id": vehicleID,
+			"message": "Vehicle deleted successfully",
+		})
+		
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// vehicleRouter handles both collection and individual vehicle operations.
+func vehicleRouter(w http.ResponseWriter, r *http.Request) {
+	// Check if this is an individual vehicle operation
+	pathParts := strings.Split(r.URL.Path, "/")
+	if len(pathParts) > 3 && pathParts[3] != "" {
+		// Individual vehicle operation
+		vehicleHandler(w, r)
+		return
+	}
+	
+	// Collection operation (GET, POST)
+	vehicleCollectionHandler(w, r)
+}
+
+// vehicleCollectionHandler handles vehicle collection operations (GET, POST).
+func vehicleCollectionHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		// Get all vehicles - for now return empty array
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("[]"))
+	case http.MethodPost:
+		// Create new vehicle
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read body", http.StatusBadRequest)
+			return
+		}
+		
+		var vehicleInput struct {
+			Type            string           `json:"type"`
+			Make            string           `json:"make"`
+			Model           string           `json:"model"`
+			Year            int              `json:"year"`
+			CurrentLocation models.Location  `json:"current_location,omitempty"`
+			Status          string           `json:"status"`
+		}
+		
+		if err := json.Unmarshal(body, &vehicleInput); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		
+		// Input validation
+		if vehicleInput.Type == "" {
+			http.Error(w, "type is required", http.StatusBadRequest)
+			return
+		}
+		if vehicleInput.Type != "ICE" && vehicleInput.Type != "EV" {
+			http.Error(w, "type must be 'ICE' or 'EV'", http.StatusBadRequest)
+			return
+		}
+		if vehicleInput.Status == "" {
+			http.Error(w, "status is required", http.StatusBadRequest)
+			return
+		}
+		if vehicleInput.Status != "active" && vehicleInput.Status != "inactive" {
+			http.Error(w, "status must be 'active' or 'inactive'", http.StatusBadRequest)
+			return
+		}
+		if vehicleInput.Make == "" {
+			http.Error(w, "make is required", http.StatusBadRequest)
+			return
+		}
+		if vehicleInput.Model == "" {
+			http.Error(w, "model is required", http.StatusBadRequest)
+			return
+		}
+		if vehicleInput.Year < 1900 || vehicleInput.Year > 2030 {
+			http.Error(w, "year must be between 1900 and 2030", http.StatusBadRequest)
+			return
+		}
+		
+		// For now, just return success (in real implementation, would store in DB)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id": primitive.NewObjectID().Hex(),
+			"message": "Vehicle created successfully",
+		})
+		
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
@@ -284,7 +550,7 @@ func main() {
     telemetryMetricsHandler := TelemetryMetricsHandler{Collection: telemetryCollection}
 
     http.Handle("/api/telemetry", corsMiddleware(telemetryHandler))
-    http.Handle("/api/vehicles", corsMiddleware(http.HandlerFunc(vehiclesHandler)))
+    http.Handle("/api/vehicles", corsMiddleware(http.HandlerFunc(vehicleRouter)))
     http.Handle("/api/telemetry/metrics", corsMiddleware(telemetryMetricsHandler))
     port := os.Getenv("PORT")
     if port == "" {

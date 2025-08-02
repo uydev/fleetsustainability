@@ -69,6 +69,21 @@ class ApiService {
   // Vehicles endpoints
   async getVehicles(): Promise<Vehicle[]> {
     const response = await this.api.get('/api/vehicles');
+    return response.data || [];
+  }
+
+  async createVehicle(vehicle: Omit<Vehicle, 'id'>): Promise<{ id: string; message: string }> {
+    const response = await this.api.post('/api/vehicles', vehicle);
+    return response.data;
+  }
+
+  async updateVehicle(id: string, vehicle: Partial<Vehicle>): Promise<{ id: string; message: string }> {
+    const response = await this.api.put(`/api/vehicles/${id}`, vehicle);
+    return response.data;
+  }
+
+  async deleteVehicle(id: string): Promise<{ id: string; message: string }> {
+    const response = await this.api.delete(`/api/vehicles/${id}`);
     return response.data;
   }
 
