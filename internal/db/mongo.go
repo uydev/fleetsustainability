@@ -11,6 +11,7 @@ import (
     "github.com/ukydev/fleet-sustainability/internal/models"
 )
 
+// ConnectMongo connects to MongoDB using the MONGO_URI environment variable.
 func ConnectMongo() (*mongo.Client, error) {
     uri := os.Getenv("MONGO_URI")
     if uri == "" {
@@ -32,10 +33,12 @@ func ConnectMongo() (*mongo.Client, error) {
     return client, nil
 }
 
+// MongoCollection wraps a MongoDB collection for telemetry operations.
 type MongoCollection struct {
     Collection *mongo.Collection
 }
 
+// InsertTelemetry inserts a telemetry record into the collection.
 func (c *MongoCollection) InsertTelemetry(ctx context.Context, telemetry models.Telemetry) error {
     if c.Collection == nil {
         return fmt.Errorf("mongo collection is nil")
@@ -44,10 +47,12 @@ func (c *MongoCollection) InsertTelemetry(ctx context.Context, telemetry models.
     return err
 }
 
+// mongoTelemetryCursor wraps a MongoDB cursor for telemetry queries.
 type mongoTelemetryCursor struct {
     cursor *mongo.Cursor
 }
 
+// All retrieves all results from the cursor.
 func (m *mongoTelemetryCursor) All(ctx context.Context, out interface{}) error {
     return m.cursor.All(ctx, out)
 }
@@ -55,6 +60,7 @@ func (m *mongoTelemetryCursor) Close(ctx context.Context) error {
     return m.cursor.Close(ctx)
 }
 
+// Find queries telemetry records from the collection.
 func (c *MongoCollection) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (TelemetryCursor, error) {
     cursor, err := c.Collection.Find(ctx, filter, opts...)
     if err != nil {

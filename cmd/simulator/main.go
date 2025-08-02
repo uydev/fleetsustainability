@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
+	log "github.com/sirupsen/logrus"
 	"math/rand"
 	"net/http"
 	"os"
@@ -57,16 +57,16 @@ func randomTelemetry(vehicleID, vtype string) Telemetry {
 func sendTelemetry(apiURL string, tele Telemetry) {
 	data, err := json.Marshal(tele)
 	if err != nil {
-		log.Printf("Failed to marshal telemetry: %v\n", err)
+		log.WithError(err).Error("Failed to marshal telemetry")
 		return
 	}
 	resp, err := http.Post(apiURL, "application/json", bytes.NewBuffer(data))
 	if err != nil {
-		log.Printf("Failed to send telemetry: %v\n", err)
+		log.WithError(err).Error("Failed to send telemetry")
 		return
 	}
 	defer resp.Body.Close()
-	log.Printf("Sent telemetry for vehicle %s, status: %s\n", tele.VehicleID, resp.Status)
+	log.WithFields(log.Fields{"vehicle_id": tele.VehicleID, "status": resp.Status}).Info("Sent telemetry")
 }
 
 func simulateVehicle(apiURL, vehicleID, vtype string, interval time.Duration) {

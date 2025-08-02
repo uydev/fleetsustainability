@@ -1,26 +1,32 @@
-# Start from the official Go image
-FROM golang:1.24.5-alpine
+# --- Build stage ---
+FROM golang:1.24.5-alpine AS builder
 
-# Install git (for go get) and bash (for scripts)
-RUN apk add --no-cache git bash
-
-# Set working directory
 WORKDIR /app
 
-# Copy go.mod first for better caching
+# Install git for go mod download if needed
+RUN apk add --no-cache git
+
+# Copy go mod/sum and download dependencies
 COPY go.mod .
-
-# Create an empty go.sum if it does not exist, then copy it (if present)
-RUN touch go.sum
 COPY go.sum .
-
-RUN go mod download || true
+RUN go mod download
 
 # Copy the rest of the source code
 COPY . .
 
-# Install golint
-RUN go install golang.org/x/lint/golint@latest
+# Build the Go binary (static build)
+RUN CGO_ENABLED=0 GOOS=linux go build -o fleet-backend ./cmd/main.go
 
-# Default command (will fail until main.go exists)
-CMD ["go", "run", "./cmd/main.go"]
+# --- Final stage (minimal) ---
+FROM alpine:3.20
+
+WORKDIR /app
+
+# Copy only the built binary
+COPY --from=builder /app/fleet-backend .
+
+# Expose the default port
+EXPOSE 8080
+
+# Run the binary
+CMD ["./fleet-backend"]

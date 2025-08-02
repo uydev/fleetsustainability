@@ -3,9 +3,8 @@ package main
 import (
     "context"
     "encoding/json"
-    "fmt"
     "io"
-    "log"
+    log "github.com/sirupsen/logrus"
     "net/http"
     "os"
     "strings"
@@ -17,13 +16,15 @@ import (
     "go.mongodb.org/mongo-driver/bson"
     "go.mongodb.org/mongo-driver/bson/primitive"
     "go.mongodb.org/mongo-driver/mongo/options"
+    "github.com/joho/godotenv"
 )
 
-// TelemetryHandler handles telemetry API requests with injected collection
+// TelemetryHandler handles telemetry API requests with injected collection.
 type TelemetryHandler struct {
     Collection db.TelemetryCollection
 }
 
+// ServeHTTP processes HTTP requests for telemetry data.
 func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
     switch r.Method {
     case http.MethodPost:
@@ -96,7 +97,7 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             http.Error(w, "Failed to store telemetry", http.StatusInternalServerError)
             return
         }
-        fmt.Printf("Stored telemetry: %+v\n", tele)
+        log.WithFields(log.Fields{"vehicle_id": tele.VehicleID}).Info("Stored telemetry")
         w.WriteHeader(http.StatusOK)
         w.Write([]byte("ok"))
     case http.MethodGet:
@@ -144,12 +145,12 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
     }
 }
 
-// Handler for /api/telemetry/metrics
-// Returns: total_emissions, ev_percent, etc.
+// TelemetryMetricsHandler handles metrics API requests for telemetry data.
 type TelemetryMetricsHandler struct {
     Collection db.TelemetryCollection
 }
 
+// ServeHTTP processes HTTP requests for telemetry metrics.
 func (h TelemetryMetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
     ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
     defer cancel()
@@ -224,6 +225,7 @@ func vehiclesHandler(w http.ResponseWriter, r *http.Request) {
 
 var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 
+// jwtAuthMiddleware is a middleware that enforces JWT authentication for protected endpoints.
 func jwtAuthMiddleware(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         authHeader := r.Header.Get("Authorization")
@@ -243,13 +245,18 @@ func jwtAuthMiddleware(next http.Handler) http.Handler {
     })
 }
 
+// main is the entry point for the Fleet Sustainability backend service.
 func main() {
+    // Load .env file for local development
+    if err := godotenv.Load(); err != nil {
+        log.WithError(err).Warn("No .env file found (this is fine in production)")
+    }
     // Connect to MongoDB
     client, err := db.ConnectMongo()
     if err != nil {
-        log.Fatalf("Failed to connect to MongoDB: %v", err)
+        log.WithError(err).Fatal("Failed to connect to MongoDB")
     }
-    fmt.Println("Connected to MongoDB successfully!")
+    log.Info("Connected to MongoDB successfully!")
     mongoDBName := os.Getenv("MONGO_DB")
     if mongoDBName == "" {
         mongoDBName = "fleet"
@@ -271,10 +278,10 @@ func main() {
     keyFile := os.Getenv("TLS_KEY_FILE")
 
     if useHTTPS == "true" && certFile != "" && keyFile != "" {
-        fmt.Printf("HTTPS server listening on :%s\n", port)
+        log.WithField("port", port).Info("HTTPS server listening")
         log.Fatal(http.ListenAndServeTLS(":"+port, certFile, keyFile, nil))
     } else {
-        fmt.Printf("HTTP server listening on :%s\n", port)
+        log.WithField("port", port).Info("HTTP server listening")
         log.Fatal(http.ListenAndServe(":"+port, nil))
     }
 }
