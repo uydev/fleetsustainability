@@ -519,7 +519,11 @@ func TestTelemetryMetricsHandler_MixedFleet(t *testing.T) {
 func TestVehiclesHandler_GET(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/vehicles", nil)
 	w := httptest.NewRecorder()
-	vehicleCollectionHandler(w, req)
+	func() {
+		mockCollection := &mockVehicleCollection{results: []models.Vehicle{}}
+		handler := &VehicleCollectionHandler{Collection: mockCollection}
+		handler.ServeHTTP(w, req)
+	}()
 	
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
@@ -531,7 +535,7 @@ func TestVehiclesHandler_GET(t *testing.T) {
 	}
 	
 	body := w.Body.String()
-	if body != "[]" {
+	if strings.TrimSpace(body) != "[]" {
 		t.Errorf("expected empty array, got %s", body)
 	}
 }
@@ -543,7 +547,11 @@ func TestVehiclesHandler_MethodNotAllowed(t *testing.T) {
 		t.Run(method, func(t *testing.T) {
 			req := httptest.NewRequest(method, "/api/vehicles", nil)
 			w := httptest.NewRecorder()
-			vehicleCollectionHandler(w, req)
+			func() {
+		mockCollection := &mockVehicleCollection{results: []models.Vehicle{}}
+		handler := &VehicleCollectionHandler{Collection: mockCollection}
+		handler.ServeHTTP(w, req)
+	}()
 			
 			if w.Code != http.StatusMethodNotAllowed {
 				t.Errorf("expected 405, got %d", w.Code)
@@ -1055,14 +1063,18 @@ func TestVehicleHandler_GetVehicles(t *testing.T) {
 			}
 
 			rr := httptest.NewRecorder()
-			vehicleCollectionHandler(rr, req)
+			func() {
+			mockCollection := &mockVehicleCollection{results: []models.Vehicle{}}
+			handler := &VehicleCollectionHandler{Collection: mockCollection}
+			handler.ServeHTTP(rr, req)
+		}()
 
 			if status := rr.Code; status != tt.expectedStatus {
 				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
 			}
 
 			if tt.expectedBody != "" {
-				if rr.Body.String() != tt.expectedBody {
+				if strings.TrimSpace(rr.Body.String()) != strings.TrimSpace(tt.expectedBody) {
 					t.Errorf("handler returned unexpected body: got %v want %v", rr.Body.String(), tt.expectedBody)
 				}
 			}
@@ -1149,7 +1161,11 @@ func TestVehicleHandler_PostVehicle(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 
 			rr := httptest.NewRecorder()
-			vehicleCollectionHandler(rr, req)
+			func() {
+			mockCollection := &mockVehicleCollection{results: []models.Vehicle{}}
+			handler := &VehicleCollectionHandler{Collection: mockCollection}
+			handler.ServeHTTP(rr, req)
+		}()
 
 			if status := rr.Code; status != tt.expectedStatus {
 				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
@@ -1231,7 +1247,11 @@ func TestVehicleHandler_PutVehicle(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 
 			rr := httptest.NewRecorder()
+			func() {
+			mockCollection := &mockVehicleCollection{results: []models.Vehicle{}}
+			vehicleCollectionHandler = &VehicleCollectionHandler{Collection: mockCollection}
 			vehicleHandler(rr, req)
+		}()
 
 			if status := rr.Code; status != tt.expectedStatus {
 				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
@@ -1271,11 +1291,59 @@ func TestVehicleHandler_DeleteVehicle(t *testing.T) {
 			}
 
 			rr := httptest.NewRecorder()
+			func() {
+			mockCollection := &mockVehicleCollection{results: []models.Vehicle{}}
+			vehicleCollectionHandler = &VehicleCollectionHandler{Collection: mockCollection}
 			vehicleHandler(rr, req)
+		}()
 
 			if status := rr.Code; status != tt.expectedStatus {
 				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
 			}
 		})
 	}
+}
+type mockVehicleCollection struct {
+	results []models.Vehicle
+	findErr error
+}
+
+func (m *mockVehicleCollection) FindVehicles(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (db.VehicleCursor, error) {
+	if m.findErr != nil {
+		return nil, m.findErr
+	}
+	return &mockVehicleCursor{results: m.results}, nil
+}
+
+func (m *mockVehicleCollection) InsertVehicle(ctx context.Context, vehicle models.Vehicle) error {
+	return nil
+}
+
+func (m *mockVehicleCollection) FindVehicleByID(ctx context.Context, id string) (*models.Vehicle, error) {
+	if m.findErr != nil {
+		return nil, m.findErr
+	}
+	return &models.Vehicle{ID: primitive.NewObjectID(), Type: "EV", Make: "Tesla", Model: "Model 3", Year: 2023, Status: "active"}, nil
+}
+
+func (m *mockVehicleCollection) UpdateVehicle(ctx context.Context, id string, vehicle models.Vehicle) error {
+	return nil
+}
+
+func (m *mockVehicleCollection) DeleteVehicle(ctx context.Context, id string) error {
+	return nil
+}
+
+type mockVehicleCursor struct {
+	results []models.Vehicle
+}
+
+func (m *mockVehicleCursor) All(ctx context.Context, out interface{}) error {
+	vehicles := out.(*[]models.Vehicle)
+	*vehicles = m.results
+	return nil
+}
+
+func (m *mockVehicleCursor) Close(ctx context.Context) error {
+	return nil
 }

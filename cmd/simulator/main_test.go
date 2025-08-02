@@ -15,11 +15,11 @@ import (
 func TestRandomLocation(t *testing.T) {
 	loc := randomLocation()
 	
-	// Check bounds for London area
-	if loc.Lat < 51.0 || loc.Lat > 52.0 {
+	// Check bounds for NYC area
+	if loc.Lat < 40.7 || loc.Lat > 40.8 {
 		t.Errorf("Latitude out of expected range: %f", loc.Lat)
 	}
-	if loc.Lon < -0.1 || loc.Lon > 0.9 {
+	if loc.Lon < -74.0 || loc.Lon > -73.9 {
 		t.Errorf("Longitude out of expected range: %f", loc.Lon)
 	}
 }
@@ -348,7 +348,7 @@ func TestSimulateVehicle_VehicleTypeDistribution(t *testing.T) {
 		t.Error("No EV vehicles generated")
 	}
 	
-	// Should have roughly equal distribution (allowing for some variance)
+	// Should have reasonable distribution (allowing for variance)
 	total := iceCount + evCount
 	if iceCount < total/4 || iceCount > 3*total/4 {
 		t.Errorf("ICE distribution seems off: %d out of %d", iceCount, total)
@@ -386,13 +386,14 @@ func TestSimulateVehicle_StatusDistribution(t *testing.T) {
 		t.Error("No inactive vehicles generated")
 	}
 	
-	// Should have roughly equal distribution (allowing for some variance)
+	// Should have reasonable distribution (allowing for variance)
+	// With 80/20 split, we expect roughly 70-90% active and 10-30% inactive
 	total := activeCount + inactiveCount
-	if activeCount < total/4 || activeCount > 3*total/4 {
-		t.Errorf("Active distribution seems off: %d out of %d", activeCount, total)
+	if activeCount < total*7/10 || activeCount > total*9/10 {
+		t.Errorf("Active distribution seems off: %d out of %d (expected 70-90%%)", activeCount, total)
 	}
-	if inactiveCount < total/4 || inactiveCount > 3*total/4 {
-		t.Errorf("Inactive distribution seems off: %d out of %d", inactiveCount, total)
+	if inactiveCount < total/10 || inactiveCount > total*3/10 {
+		t.Errorf("Inactive distribution seems off: %d out of %d (expected 10-30%%)", inactiveCount, total)
 	}
 }
 

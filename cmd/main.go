@@ -22,17 +22,15 @@ import (
 // corsMiddleware adds CORS headers to allow frontend requests
 func corsMiddleware(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        // Allow requests from the frontend
-        w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
+        // Allow requests from any origin (for development)
+        w.Header().Set("Access-Control-Allow-Origin", "*")
         w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-        
         // Handle preflight requests
         if r.Method == "OPTIONS" {
             w.WriteHeader(http.StatusOK)
             return
         }
-        
         next.ServeHTTP(w, r)
     })
 }
@@ -344,6 +342,7 @@ func (h *VehicleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // vehicleHandler handles individual vehicle operations (PUT, DELETE).
+// vehicleHandler handles individual vehicle operations (GET, PUT, DELETE).
 func vehicleHandler(w http.ResponseWriter, r *http.Request) {
 	// Extract vehicle ID from URL path
 	pathParts := strings.Split(r.URL.Path, "/")
@@ -360,6 +359,20 @@ func vehicleHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	switch r.Method {
+	case http.MethodGet:
+		// Get individual vehicle
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		
+		vehicle, err := vehicleCollectionHandler.Collection.FindVehicleByID(ctx, vehicleID)
+		if err != nil {
+			http.Error(w, "Vehicle not found", http.StatusNotFound)
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(vehicle)
+		
 	case http.MethodPut:
 		// Update vehicle
 		body, err := io.ReadAll(r.Body)
@@ -396,8 +409,43 @@ func vehicleHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		
-		// For now, just return success (in real implementation, would update in DB)
-		// In a real implementation, we would check if the vehicle exists first
+		// Get existing vehicle to merge with updates
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		
+		existingVehicle, err := vehicleCollectionHandler.Collection.FindVehicleByID(ctx, vehicleID)
+		if err != nil {
+			http.Error(w, "Vehicle not found", http.StatusNotFound)
+			return
+		}
+		
+		// Update fields if provided
+		if vehicleInput.Type != "" {
+			existingVehicle.Type = vehicleInput.Type
+		}
+		if vehicleInput.Make != "" {
+			existingVehicle.Make = vehicleInput.Make
+		}
+		if vehicleInput.Model != "" {
+			existingVehicle.Model = vehicleInput.Model
+		}
+		if vehicleInput.Year != 0 {
+			existingVehicle.Year = vehicleInput.Year
+		}
+		if vehicleInput.Status != "" {
+			existingVehicle.Status = vehicleInput.Status
+		}
+		if vehicleInput.CurrentLocation.Lat != 0 || vehicleInput.CurrentLocation.Lon != 0 {
+			existingVehicle.CurrentLocation = vehicleInput.CurrentLocation
+		}
+		
+		// Update in database
+		if err := vehicleCollectionHandler.Collection.UpdateVehicle(ctx, vehicleID, *existingVehicle); err != nil {
+			log.WithError(err).Error("Failed to update vehicle")
+			http.Error(w, "Failed to update vehicle", http.StatusInternalServerError)
+			return
+		}
+		
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -407,8 +455,23 @@ func vehicleHandler(w http.ResponseWriter, r *http.Request) {
 		
 	case http.MethodDelete:
 		// Delete vehicle
-		// For now, just return success (in real implementation, would delete from DB)
-		// In a real implementation, we would check if the vehicle exists first
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		
+		// Check if vehicle exists
+		_, err := vehicleCollectionHandler.Collection.FindVehicleByID(ctx, vehicleID)
+		if err != nil {
+			http.Error(w, "Vehicle not found", http.StatusNotFound)
+			return
+		}
+		
+		// Delete from database
+		if err := vehicleCollectionHandler.Collection.DeleteVehicle(ctx, vehicleID); err != nil {
+			log.WithError(err).Error("Failed to delete vehicle")
+			http.Error(w, "Failed to delete vehicle", http.StatusInternalServerError)
+			return
+		}
+		
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -420,7 +483,6 @@ func vehicleHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
-
 // vehicleRouter handles both collection and individual vehicle operations.
 func vehicleRouter(w http.ResponseWriter, r *http.Request) {
 	// Check if this is an individual vehicle operation
@@ -839,7 +901,12 @@ func main() {
     telemetryMetricsHandler := TelemetryMetricsHandler{Collection: telemetryCollection}
 
     http.Handle("/api/telemetry", corsMiddleware(telemetryHandler))
-    http.Handle("/api/vehicles", corsMiddleware(http.HandlerFunc(vehicleRouter)))
+    http.HandleFunc("/api/vehicles", func(w http.ResponseWriter, r *http.Request) {
+		corsMiddleware(http.HandlerFunc(vehicleRouter)).ServeHTTP(w, r)
+	})
+	http.HandleFunc("/api/vehicles/", func(w http.ResponseWriter, r *http.Request) {
+		corsMiddleware(http.HandlerFunc(vehicleRouter)).ServeHTTP(w, r)
+	})
     http.Handle("/api/trips", corsMiddleware(tripHandler))
     http.Handle("/api/maintenance", corsMiddleware(maintenanceHandler))
     http.Handle("/api/costs", corsMiddleware(costHandler))

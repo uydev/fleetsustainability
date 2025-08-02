@@ -111,7 +111,7 @@ func randomTelemetry(vehicleID, vtype string) Telemetry {
 		Speed:     rand.Float64()*100 + 10,
 		Emissions: rand.Float64() * 50,
 		Type:      vtype,
-		Status:    "active", // Most vehicles are active
+		Status:    func() string { if rand.Float64() < 0.8 { return "active" } else { return "inactive" } }(), // 80% active, 20% inactive
 	}
 	if vtype == "ICE" {
 		tele.FuelLevel = rand.Float64() * 100
