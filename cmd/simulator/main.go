@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/rand"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -53,14 +55,18 @@ func randomTelemetry(vehicleID, vtype string) Telemetry {
 }
 
 func sendTelemetry(apiURL string, tele Telemetry) {
-	data, _ := json.Marshal(tele)
+	data, err := json.Marshal(tele)
+	if err != nil {
+		log.Printf("Failed to marshal telemetry: %v\n", err)
+		return
+	}
 	resp, err := http.Post(apiURL, "application/json", bytes.NewBuffer(data))
 	if err != nil {
-		fmt.Printf("Failed to send telemetry: %v\n", err)
+		log.Printf("Failed to send telemetry: %v\n", err)
 		return
 	}
 	defer resp.Body.Close()
-	fmt.Printf("Sent telemetry for vehicle %s, status: %s\n", tele.VehicleID, resp.Status)
+	log.Printf("Sent telemetry for vehicle %s, status: %s\n", tele.VehicleID, resp.Status)
 }
 
 func simulateVehicle(apiURL, vehicleID, vtype string, interval time.Duration) {
@@ -75,7 +81,7 @@ func main() {
 	rand.Seed(time.Now().UnixNano())
 	fleetSize := 10
 	if val := os.Getenv("FLEET_SIZE"); val != "" {
-		if n, err := fmt.Sscanf(val, "%d", &fleetSize); n == 1 && err == nil {
+		if n, err := strconv.Atoi(val); err == nil {
 			fleetSize = n
 		}
 	}

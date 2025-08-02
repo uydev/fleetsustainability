@@ -32,11 +32,33 @@ func ConnectMongo() (*mongo.Client, error) {
     return client, nil
 }
 
-func InsertTelemetry(client *mongo.Client, telemetry models.Telemetry) error {
-    if client == nil {
-        return fmt.Errorf("mongo client is nil")
+type MongoCollection struct {
+    Collection *mongo.Collection
+}
+
+func (c *MongoCollection) InsertTelemetry(ctx context.Context, telemetry models.Telemetry) error {
+    if c.Collection == nil {
+        return fmt.Errorf("mongo collection is nil")
     }
-    collection := client.Database("fleet").Collection("telemetry")
-    _, err := collection.InsertOne(context.Background(), telemetry)
+    _, err := c.Collection.InsertOne(ctx, telemetry)
     return err
+}
+
+type mongoTelemetryCursor struct {
+    cursor *mongo.Cursor
+}
+
+func (m *mongoTelemetryCursor) All(ctx context.Context, out interface{}) error {
+    return m.cursor.All(ctx, out)
+}
+func (m *mongoTelemetryCursor) Close(ctx context.Context) error {
+    return m.cursor.Close(ctx)
+}
+
+func (c *MongoCollection) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (TelemetryCursor, error) {
+    cursor, err := c.Collection.Find(ctx, filter, opts...)
+    if err != nil {
+        return nil, err
+    }
+    return &mongoTelemetryCursor{cursor: cursor}, nil
 }

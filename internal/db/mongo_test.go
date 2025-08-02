@@ -24,9 +24,10 @@ func TestConnectMongo_BadURI(t *testing.T) {
 
 func TestInsertTelemetry_NilClient(t *testing.T) {
     tele := models.Telemetry{}
-    err := InsertTelemetry(nil, tele)
+    coll := &MongoCollection{Collection: nil}
+    err := coll.InsertTelemetry(context.Background(), tele)
     if err == nil {
-        t.Error("expected error when client is nil")
+        t.Error("expected error when collection is nil")
     }
 }
 
@@ -48,8 +49,13 @@ func TestInsertTelemetry_Integration(t *testing.T) {
         t.Skipf("failed to connect: %v, skipping integration test", err)
         return
     }
+    dbName := os.Getenv("MONGO_DB")
+    if dbName == "" {
+        dbName = "fleet"
+    }
+    coll := &MongoCollection{Collection: client.Database(dbName).Collection("telemetry")}
     tele := models.Telemetry{}
-    err = InsertTelemetry(client, tele)
+    err = coll.InsertTelemetry(context.Background(), tele)
     if err != nil {
         t.Errorf("expected insert to succeed, got error: %v", err)
     }

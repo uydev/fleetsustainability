@@ -2,11 +2,16 @@ package db
 
 import (
     "context"
-    "go.mongodb.org/mongo-driver/mongo"
     "go.mongodb.org/mongo-driver/mongo/options"
+    "github.com/ukydev/fleet-sustainability/internal/models"
 )
 
+type TelemetryCursor interface {
+    All(ctx context.Context, out interface{}) error
+    Close(ctx context.Context) error
+}
+
 type TelemetryCollection interface {
-    InsertOne(ctx context.Context, doc interface{}, opts ...*options.InsertOneOptions) (*mongo.InsertOneResult, error)
-    Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (*mongo.Cursor, error)
+    InsertTelemetry(ctx context.Context, telemetry models.Telemetry) error
+    Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (TelemetryCursor, error)
 }

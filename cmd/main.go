@@ -4,12 +4,14 @@ import (
     "context"
     "encoding/json"
     "fmt"
-    "io/ioutil"
+    "io"
     "log"
     "net/http"
     "os"
+    "strings"
     "time"
 
+    "github.com/golang-jwt/jwt/v5"
     "github.com/ukydev/fleet-sustainability/internal/db"
     "github.com/ukydev/fleet-sustainability/internal/models"
     "go.mongodb.org/mongo-driver/bson"
@@ -25,7 +27,7 @@ type TelemetryHandler struct {
 func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
     switch r.Method {
     case http.MethodPost:
-        body, err := ioutil.ReadAll(r.Body)
+        body, err := io.ReadAll(r.Body)
         if err != nil {
             http.Error(w, "Failed to read body", http.StatusBadRequest)
             return
@@ -45,6 +47,32 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             http.Error(w, "Invalid JSON", http.StatusBadRequest)
             return
         }
+        // Input validation and sanitization
+        if teleIn.VehicleID == "" {
+            http.Error(w, "vehicle_id is required", http.StatusBadRequest)
+            return
+        }
+        if teleIn.Timestamp == "" {
+            http.Error(w, "timestamp is required", http.StatusBadRequest)
+            return
+        }
+        if teleIn.Type != "ICE" && teleIn.Type != "EV" {
+            http.Error(w, "type must be 'ICE' or 'EV'", http.StatusBadRequest)
+            return
+        }
+        if teleIn.Status != "active" && teleIn.Status != "inactive" {
+            http.Error(w, "status must be 'active' or 'inactive'", http.StatusBadRequest)
+            return
+        }
+        if teleIn.Speed < 0 || teleIn.Speed > 300 {
+            http.Error(w, "speed out of range", http.StatusBadRequest)
+            return
+        }
+        if teleIn.Emissions < 0 {
+            http.Error(w, "emissions must be non-negative", http.StatusBadRequest)
+            return
+        }
+        // Optionally, add more checks for FuelLevel, BatteryLevel, Location, etc.
         vehicleObjID := primitive.NewObjectID()
         timestamp, _ := time.Parse(time.RFC3339, teleIn.Timestamp)
         var fuelPtr, batteryPtr *float64
@@ -63,9 +91,7 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             BatteryLevel: batteryPtr,
             Emissions:    teleIn.Emissions,
         }
-        ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-        defer cancel()
-        _, err = h.Collection.InsertOne(ctx, tele)
+        err = h.Collection.InsertTelemetry(r.Context(), tele)
         if err != nil {
             http.Error(w, "Failed to store telemetry", http.StatusInternalServerError)
             return
@@ -74,11 +100,33 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         w.WriteHeader(http.StatusOK)
         w.Write([]byte("ok"))
     case http.MethodGet:
-        // Return all telemetry, most recent first
+        // Support time range filtering
+        fromStr := r.URL.Query().Get("from")
+        toStr := r.URL.Query().Get("to")
+        var filter bson.M = bson.M{}
+        if fromStr != "" || toStr != "" {
+            filter["timestamp"] = bson.M{}
+            if fromStr != "" {
+                from, err := time.Parse(time.RFC3339, fromStr)
+                if err != nil {
+                    http.Error(w, "Invalid 'from' time format", http.StatusBadRequest)
+                    return
+                }
+                filter["timestamp"].(bson.M)["$gte"] = from
+            }
+            if toStr != "" {
+                to, err := time.Parse(time.RFC3339, toStr)
+                if err != nil {
+                    http.Error(w, "Invalid 'to' time format", http.StatusBadRequest)
+                    return
+                }
+                filter["timestamp"].(bson.M)["$lte"] = to
+            }
+        }
         ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
         defer cancel()
         opts := options.Find().SetSort(bson.D{{"timestamp", -1}}).SetLimit(100)
-        cursor, err := h.Collection.Find(ctx, bson.D{}, opts)
+        cursor, err := h.Collection.Find(ctx, filter, opts)
         if err != nil {
             http.Error(w, "Failed to query telemetry", http.StatusInternalServerError)
             return
@@ -96,6 +144,73 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
     }
 }
 
+// Handler for /api/telemetry/metrics
+// Returns: total_emissions, ev_percent, etc.
+type TelemetryMetricsHandler struct {
+    Collection db.TelemetryCollection
+}
+
+func (h TelemetryMetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+    // Optionally support time range filtering
+    fromStr := r.URL.Query().Get("from")
+    toStr := r.URL.Query().Get("to")
+    var filter bson.M = bson.M{}
+    if fromStr != "" || toStr != "" {
+        filter["timestamp"] = bson.M{}
+        if fromStr != "" {
+            from, err := time.Parse(time.RFC3339, fromStr)
+            if err != nil {
+                http.Error(w, "Invalid 'from' time format", http.StatusBadRequest)
+                return
+            }
+            filter["timestamp"].(bson.M)["$gte"] = from
+        }
+        if toStr != "" {
+            to, err := time.Parse(time.RFC3339, toStr)
+            if err != nil {
+                http.Error(w, "Invalid 'to' time format", http.StatusBadRequest)
+                return
+            }
+            filter["timestamp"].(bson.M)["$lte"] = to
+        }
+    }
+    cursor, err := h.Collection.Find(ctx, filter)
+    if err != nil {
+        http.Error(w, "Failed to query telemetry", http.StatusInternalServerError)
+        return
+    }
+    defer cursor.Close(ctx)
+    var results []models.Telemetry
+    if err := cursor.All(ctx, &results); err != nil {
+        http.Error(w, "Failed to decode telemetry", http.StatusInternalServerError)
+        return
+    }
+    var totalEmissions float64
+    var evCount, iceCount int
+    for _, t := range results {
+        totalEmissions += t.Emissions
+        if t.BatteryLevel != nil {
+            evCount++
+        } else if t.FuelLevel != nil {
+            iceCount++
+        }
+    }
+    total := evCount + iceCount
+    evPercent := 0.0
+    if total > 0 {
+        evPercent = float64(evCount) * 100.0 / float64(total)
+    }
+    resp := map[string]interface{}{
+        "total_emissions": totalEmissions,
+        "ev_percent":      evPercent,
+        "total_records":   total,
+    }
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(resp)
+}
+
 func vehiclesHandler(w http.ResponseWriter, r *http.Request) {
     switch r.Method {
     case http.MethodGet:
@@ -105,6 +220,27 @@ func vehiclesHandler(w http.ResponseWriter, r *http.Request) {
     default:
         http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
     }
+}
+
+var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
+
+func jwtAuthMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        authHeader := r.Header.Get("Authorization")
+        if !strings.HasPrefix(authHeader, "Bearer ") {
+            http.Error(w, "Missing or invalid Authorization header", http.StatusUnauthorized)
+            return
+        }
+        tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+        token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+            return jwtSecret, nil
+        })
+        if err != nil || !token.Valid {
+            http.Error(w, "Invalid token", http.StatusUnauthorized)
+            return
+        }
+        next.ServeHTTP(w, r)
+    })
 }
 
 func main() {
@@ -118,15 +254,27 @@ func main() {
     if mongoDBName == "" {
         mongoDBName = "fleet"
     }
-    telemetryCollection := client.Database(mongoDBName).Collection("telemetry")
+    telemetryCollection := &db.MongoCollection{Collection: client.Database(mongoDBName).Collection("telemetry")}
     telemetryHandler := &TelemetryHandler{Collection: telemetryCollection}
+    telemetryMetricsHandler := TelemetryMetricsHandler{Collection: telemetryCollection}
 
-    http.Handle("/api/telemetry", telemetryHandler)
+    http.Handle("/api/telemetry", jwtAuthMiddleware(telemetryHandler))
     http.HandleFunc("/api/vehicles", vehiclesHandler)
+    http.Handle("/api/telemetry/metrics", jwtAuthMiddleware(telemetryMetricsHandler))
     port := os.Getenv("PORT")
     if port == "" {
         port = "8080"
     }
-    fmt.Printf("HTTP server listening on :%s\n", port)
-    log.Fatal(http.ListenAndServe(":"+port, nil))
+
+    useHTTPS := os.Getenv("USE_HTTPS")
+    certFile := os.Getenv("TLS_CERT_FILE")
+    keyFile := os.Getenv("TLS_KEY_FILE")
+
+    if useHTTPS == "true" && certFile != "" && keyFile != "" {
+        fmt.Printf("HTTPS server listening on :%s\n", port)
+        log.Fatal(http.ListenAndServeTLS(":"+port, certFile, keyFile, nil))
+    } else {
+        fmt.Printf("HTTP server listening on :%s\n", port)
+        log.Fatal(http.ListenAndServe(":"+port, nil))
+    }
 }
