@@ -20,23 +20,32 @@ const TimeRangeSelector: React.FC<TimeRangeSelectorProps> = ({ onTimeRangeChange
   const [fromDate, setFromDate] = useState<Date | null>(null);
   const [toDate, setToDate] = useState<Date | null>(null);
 
-  const handleQuickSelect = (days: number) => {
+  const handleQuickSelect = (range: { label: string; days?: number; hours?: number }) => {
     const to = new Date();
-    const from = subDays(to, days);
+    let from: Date;
+    
+    if (range.hours) {
+      from = new Date(to.getTime() - range.hours * 60 * 60 * 1000);
+    } else if (range.days) {
+      from = subDays(to, range.days);
+    } else {
+      from = to;
+    }
+    
     setFromDate(from);
     setToDate(to);
     
     onTimeRangeChange({
-      from: format(startOfDay(from), "yyyy-MM-dd'T'HH:mm:ss"),
-      to: format(endOfDay(to), "yyyy-MM-dd'T'HH:mm:ss"),
+      from: from.toISOString(),
+      to: to.toISOString(),
     });
   };
 
   const handleCustomRange = () => {
     if (fromDate && toDate) {
       onTimeRangeChange({
-        from: format(startOfDay(fromDate), "yyyy-MM-dd'T'HH:mm:ss"),
-        to: format(endOfDay(toDate), "yyyy-MM-dd'T'HH:mm:ss"),
+        from: fromDate.toISOString(),
+        to: toDate.toISOString(),
       });
     }
   };
@@ -48,7 +57,7 @@ const TimeRangeSelector: React.FC<TimeRangeSelectorProps> = ({ onTimeRangeChange
   };
 
   const quickRanges = [
-    { label: 'Last Hour', days: 0.04 },
+    { label: 'Last Hour', hours: 1 },
     { label: 'Last 24h', days: 1 },
     { label: 'Last 7d', days: 7 },
     { label: 'Last 30d', days: 30 },
@@ -68,7 +77,7 @@ const TimeRangeSelector: React.FC<TimeRangeSelectorProps> = ({ onTimeRangeChange
               <Chip
                 key={range.label}
                 label={range.label}
-                onClick={() => handleQuickSelect(range.days)}
+                onClick={() => handleQuickSelect(range)}
                 variant="outlined"
                 clickable
               />
