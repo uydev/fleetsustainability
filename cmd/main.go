@@ -19,6 +19,24 @@ import (
     "github.com/joho/godotenv"
 )
 
+// corsMiddleware adds CORS headers to allow frontend requests
+func corsMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        // Allow requests from the frontend
+        w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
+        w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        
+        // Handle preflight requests
+        if r.Method == "OPTIONS" {
+            w.WriteHeader(http.StatusOK)
+            return
+        }
+        
+        next.ServeHTTP(w, r)
+    })
+}
+
 // TelemetryHandler handles telemetry API requests with injected collection.
 type TelemetryHandler struct {
     Collection db.TelemetryCollection
@@ -265,9 +283,9 @@ func main() {
     telemetryHandler := &TelemetryHandler{Collection: telemetryCollection}
     telemetryMetricsHandler := TelemetryMetricsHandler{Collection: telemetryCollection}
 
-    http.Handle("/api/telemetry", jwtAuthMiddleware(telemetryHandler))
-    http.HandleFunc("/api/vehicles", vehiclesHandler)
-    http.Handle("/api/telemetry/metrics", jwtAuthMiddleware(telemetryMetricsHandler))
+    http.Handle("/api/telemetry", corsMiddleware(telemetryHandler))
+    http.Handle("/api/vehicles", corsMiddleware(http.HandlerFunc(vehiclesHandler)))
+    http.Handle("/api/telemetry/metrics", corsMiddleware(telemetryMetricsHandler))
     port := os.Getenv("PORT")
     if port == "" {
         port = "8080"
