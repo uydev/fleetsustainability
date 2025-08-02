@@ -83,73 +83,73 @@ class ApiService {
   }
 
   async deleteVehicle(id: string): Promise<{ id: string; message: string }> {
-    const response = await this.api.delete(`/vehicles/${id}`);
+    const response = await this.api.delete(`/api/vehicles/${id}`);
     return response.data;
   }
 
   // Trip methods
   async getTrips(timeRange?: TimeRange): Promise<Trip[]> {
     const params = timeRange ? { from: timeRange.from, to: timeRange.to } : {};
-    const response = await this.api.get('/trips', { params });
+    const response = await this.api.get('/api/trips', { params });
     return response.data || [];
   }
 
   async postTrip(trip: Omit<Trip, 'id'>): Promise<{ id: string; message: string }> {
-    const response = await this.api.post('/trips', trip);
+    const response = await this.api.post('/api/trips', trip);
     return response.data;
   }
 
   async updateTrip(id: string, trip: Partial<Trip>): Promise<{ id: string; message: string }> {
-    const response = await this.api.put(`/trips/${id}`, trip);
+    const response = await this.api.put(`/api/trips/${id}`, trip);
     return response.data;
   }
 
   async deleteTrip(id: string): Promise<{ id: string; message: string }> {
-    const response = await this.api.delete(`/trips/${id}`);
+    const response = await this.api.delete(`/api/trips/${id}`);
     return response.data;
   }
 
   // Maintenance methods
   async getMaintenance(timeRange?: TimeRange): Promise<Maintenance[]> {
     const params = timeRange ? { from: timeRange.from, to: timeRange.to } : {};
-    const response = await this.api.get('/maintenance', { params });
+    const response = await this.api.get('/api/maintenance', { params });
     return response.data || [];
   }
 
   async postMaintenance(maintenance: Omit<Maintenance, 'id'>): Promise<{ id: string; message: string }> {
-    const response = await this.api.post('/maintenance', maintenance);
+    const response = await this.api.post('/api/maintenance', maintenance);
     return response.data;
   }
 
   async updateMaintenance(id: string, maintenance: Partial<Maintenance>): Promise<{ id: string; message: string }> {
-    const response = await this.api.put(`/maintenance/${id}`, maintenance);
+    const response = await this.api.put(`/api/maintenance/${id}`, maintenance);
     return response.data;
   }
 
   async deleteMaintenance(id: string): Promise<{ id: string; message: string }> {
-    const response = await this.api.delete(`/maintenance/${id}`);
+    const response = await this.api.delete(`/api/maintenance/${id}`);
     return response.data;
   }
 
   // Cost methods
   async getCosts(timeRange?: TimeRange): Promise<Cost[]> {
     const params = timeRange ? { from: timeRange.from, to: timeRange.to } : {};
-    const response = await this.api.get('/costs', { params });
+    const response = await this.api.get('/api/costs', { params });
     return response.data || [];
   }
 
   async postCost(cost: Omit<Cost, 'id'>): Promise<{ id: string; message: string }> {
-    const response = await this.api.post('/costs', cost);
+    const response = await this.api.post('/api/costs', cost);
     return response.data;
   }
 
   async updateCost(id: string, cost: Partial<Cost>): Promise<{ id: string; message: string }> {
-    const response = await this.api.put(`/costs/${id}`, cost);
+    const response = await this.api.put(`/api/costs/${id}`, cost);
     return response.data;
   }
 
   async deleteCost(id: string): Promise<{ id: string; message: string }> {
-    const response = await this.api.delete(`/costs/${id}`);
+    const response = await this.api.delete(`/api/costs/${id}`);
     return response.data;
   }
 
