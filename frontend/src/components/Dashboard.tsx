@@ -13,6 +13,7 @@ import MetricsPanel from './MetricsPanel';
 import VehicleList from './VehicleList';
 import TimeRangeSelector from './TimeRangeSelector';
 import FleetManagement from './FleetManagement';
+import TelemetryManagement from './TelemetryManagement';
 import apiService from '../services/api';
 import { Telemetry, FleetMetrics, Vehicle } from '../types';
 
@@ -126,6 +127,7 @@ const Dashboard: React.FC = () => {
         <Tabs value={tabValue} onChange={handleTabChange} aria-label="dashboard tabs">
           <Tab label="Fleet Overview" />
           <Tab label="Fleet Management" />
+          <Tab label="Telemetry Management" />
         </Tabs>
       </Box>
 
@@ -153,6 +155,10 @@ const Dashboard: React.FC = () => {
 
       <TabPanel value={tabValue} index={1}>
         <FleetManagement />
+      </TabPanel>
+
+      <TabPanel value={tabValue} index={2}>
+        <TelemetryManagement />
       </TabPanel>
     </Container>
   );

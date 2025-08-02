@@ -431,17 +431,39 @@ func vehicleRouter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// Collection operation (GET, POST)
-	vehicleCollectionHandler(w, r)
+	// Collection operation (GET, POST) - use the handler from main
+	vehicleCollectionHandler.ServeHTTP(w, r)
 }
 
-// vehicleCollectionHandler handles vehicle collection operations (GET, POST).
-func vehicleCollectionHandler(w http.ResponseWriter, r *http.Request) {
+// VehicleCollectionHandler handles vehicle collection operations (GET, POST).
+type VehicleCollectionHandler struct {
+	Collection db.VehicleCollection
+}
+
+// ServeHTTP processes HTTP requests for vehicle collection operations.
+func (h *VehicleCollectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		// Get all vehicles - for now return empty array
+		// Get all vehicles
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		
+		cursor, err := h.Collection.FindVehicles(ctx, bson.M{})
+		if err != nil {
+			http.Error(w, "Failed to query vehicles", http.StatusInternalServerError)
+			return
+		}
+		defer cursor.Close(ctx)
+		
+		var results []models.Vehicle
+		if err := cursor.All(ctx, &results); err != nil {
+			http.Error(w, "Failed to decode vehicles", http.StatusInternalServerError)
+			return
+		}
+		
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte("[]"))
+		json.NewEncoder(w).Encode(results)
+		
 	case http.MethodPost:
 		// Create new vehicle
 		body, err := io.ReadAll(r.Body)
@@ -494,7 +516,26 @@ func vehicleCollectionHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		
-		// For now, just return success (in real implementation, would store in DB)
+		// Create vehicle model
+		vehicle := models.Vehicle{
+			Type:            vehicleInput.Type,
+			Make:            vehicleInput.Make,
+			Model:           vehicleInput.Model,
+			Year:            vehicleInput.Year,
+			CurrentLocation: vehicleInput.CurrentLocation,
+			Status:          vehicleInput.Status,
+		}
+		
+		// Store vehicle in database
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		
+		if err := h.Collection.InsertVehicle(ctx, vehicle); err != nil {
+			log.WithError(err).Error("Failed to insert vehicle")
+			http.Error(w, "Failed to create vehicle", http.StatusInternalServerError)
+			return
+		}
+		
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -508,6 +549,7 @@ func vehicleCollectionHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
+var vehicleCollectionHandler *VehicleCollectionHandler
 
 // jwtAuthMiddleware is a middleware that enforces JWT authentication for protected endpoints.
 func jwtAuthMiddleware(next http.Handler) http.Handler {
@@ -546,7 +588,9 @@ func main() {
         mongoDBName = "fleet"
     }
     telemetryCollection := &db.MongoCollection{Collection: client.Database(mongoDBName).Collection("telemetry")}
+    vehicleCollection := &db.MongoCollection{Collection: client.Database(mongoDBName).Collection("vehicles")}
     telemetryHandler := &TelemetryHandler{Collection: telemetryCollection}
+    vehicleCollectionHandler = &VehicleCollectionHandler{Collection: vehicleCollection}
     telemetryMetricsHandler := TelemetryMetricsHandler{Collection: telemetryCollection}
 
     http.Handle("/api/telemetry", corsMiddleware(telemetryHandler))
