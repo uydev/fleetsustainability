@@ -16,6 +16,64 @@ export interface Telemetry {
   status: 'active' | 'inactive';
 }
 
+export interface Trip {
+  id?: string;
+  vehicle_id: string;
+  driver_id: string;
+  start_location: Location;
+  end_location: Location;
+  start_time: string;
+  end_time: string;
+  distance: number;
+  duration: number;
+  fuel_consumption: number;
+  battery_consumption: number;
+  cost: number;
+  purpose: 'business' | 'personal' | 'delivery';
+  status: 'planned' | 'in_progress' | 'completed' | 'cancelled';
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Maintenance {
+  id?: string;
+  vehicle_id: string;
+  service_type: 'oil_change' | 'tire_rotation' | 'brake_service' | 'battery_service' | 'inspection';
+  description: string;
+  service_date: string;
+  next_service_date: string;
+  mileage: number;
+  cost: number;
+  labor_cost: number;
+  parts_cost: number;
+  technician: string;
+  service_location: string;
+  status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
+  priority: 'low' | 'medium' | 'high' | 'critical';
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Cost {
+  id?: string;
+  vehicle_id: string;
+  category: 'fuel' | 'maintenance' | 'insurance' | 'registration' | 'tolls' | 'parking' | 'other';
+  description: string;
+  amount: number;
+  date: string;
+  invoice_number: string;
+  vendor: string;
+  location: string;
+  payment_method: 'credit_card' | 'cash' | 'check' | 'electronic';
+  status: 'pending' | 'paid' | 'disputed' | 'cancelled';
+  receipt_url: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface FleetMetrics {
   total_emissions: number;
   ev_percent: number;

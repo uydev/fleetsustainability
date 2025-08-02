@@ -14,6 +14,9 @@ import VehicleList from './VehicleList';
 import TimeRangeSelector from './TimeRangeSelector';
 import FleetManagement from './FleetManagement';
 import TelemetryManagement from './TelemetryManagement';
+import TripManagement from './TripManagement';
+import MaintenanceManagement from './MaintenanceManagement';
+import CostManagement from './CostManagement';
 import apiService from '../services/api';
 import { Telemetry, FleetMetrics, Vehicle } from '../types';
 
@@ -128,6 +131,9 @@ const Dashboard: React.FC = () => {
           <Tab label="Fleet Overview" />
           <Tab label="Fleet Management" />
           <Tab label="Telemetry Management" />
+          <Tab label="Trip Management" />
+          <Tab label="Maintenance" />
+          <Tab label="Cost Management" />
         </Tabs>
       </Box>
 
@@ -159,6 +165,18 @@ const Dashboard: React.FC = () => {
 
       <TabPanel value={tabValue} index={2}>
         <TelemetryManagement />
+      </TabPanel>
+
+      <TabPanel value={tabValue} index={3}>
+        <TripManagement />
+      </TabPanel>
+
+      <TabPanel value={tabValue} index={4}>
+        <MaintenanceManagement />
+      </TabPanel>
+
+      <TabPanel value={tabValue} index={5}>
+        <CostManagement />
       </TabPanel>
     </Container>
   );

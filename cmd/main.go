@@ -548,6 +548,244 @@ func (h *VehicleCollectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	}
 }
 
+// TripHandler handles trip management API requests.
+type TripHandler struct {
+	Collection db.TripCollection
+}
+
+// ServeHTTP processes HTTP requests for trip management.
+func (h *TripHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		// Get all trips
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		
+		cursor, err := h.Collection.FindTrips(ctx, bson.M{})
+		if err != nil {
+			http.Error(w, "Failed to query trips", http.StatusInternalServerError)
+			return
+		}
+		defer cursor.Close(ctx)
+		
+		var results []models.Trip
+		if err := cursor.All(ctx, &results); err != nil {
+			http.Error(w, "Failed to decode trips", http.StatusInternalServerError)
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(results)
+		
+	case http.MethodPost:
+		// Create new trip
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read body", http.StatusBadRequest)
+			return
+		}
+		
+		var trip models.Trip
+		if err := json.Unmarshal(body, &trip); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		
+		// Input validation
+		if trip.VehicleID == "" {
+			http.Error(w, "vehicle_id is required", http.StatusBadRequest)
+			return
+		}
+		if trip.StartTime.IsZero() {
+			http.Error(w, "start_time is required", http.StatusBadRequest)
+			return
+		}
+		if trip.Status == "" {
+			trip.Status = "planned"
+		}
+		
+		// Store trip in database
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		
+		if err := h.Collection.InsertTrip(ctx, trip); err != nil {
+			log.WithError(err).Error("Failed to insert trip")
+			http.Error(w, "Failed to create trip", http.StatusInternalServerError)
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id": primitive.NewObjectID().Hex(),
+			"message": "Trip created successfully",
+		})
+		
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// MaintenanceHandler handles maintenance management API requests.
+type MaintenanceHandler struct {
+	Collection db.MaintenanceCollection
+}
+
+// ServeHTTP processes HTTP requests for maintenance management.
+func (h *MaintenanceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		// Get all maintenance records
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		
+		cursor, err := h.Collection.FindMaintenance(ctx, bson.M{})
+		if err != nil {
+			http.Error(w, "Failed to query maintenance", http.StatusInternalServerError)
+			return
+		}
+		defer cursor.Close(ctx)
+		
+		var results []models.Maintenance
+		if err := cursor.All(ctx, &results); err != nil {
+			http.Error(w, "Failed to decode maintenance", http.StatusInternalServerError)
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(results)
+		
+	case http.MethodPost:
+		// Create new maintenance record
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read body", http.StatusBadRequest)
+			return
+		}
+		
+		var maintenance models.Maintenance
+		if err := json.Unmarshal(body, &maintenance); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		
+		// Input validation
+		if maintenance.VehicleID == "" {
+			http.Error(w, "vehicle_id is required", http.StatusBadRequest)
+			return
+		}
+		if maintenance.ServiceType == "" {
+			http.Error(w, "service_type is required", http.StatusBadRequest)
+			return
+		}
+		if maintenance.Status == "" {
+			maintenance.Status = "scheduled"
+		}
+		
+		// Store maintenance in database
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		
+		if err := h.Collection.InsertMaintenance(ctx, maintenance); err != nil {
+			log.WithError(err).Error("Failed to insert maintenance")
+			http.Error(w, "Failed to create maintenance", http.StatusInternalServerError)
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id": primitive.NewObjectID().Hex(),
+			"message": "Maintenance created successfully",
+		})
+		
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// CostHandler handles cost management API requests.
+type CostHandler struct {
+	Collection db.CostCollection
+}
+
+// ServeHTTP processes HTTP requests for cost management.
+func (h *CostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		// Get all cost records
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		
+		cursor, err := h.Collection.FindCosts(ctx, bson.M{})
+		if err != nil {
+			http.Error(w, "Failed to query costs", http.StatusInternalServerError)
+			return
+		}
+		defer cursor.Close(ctx)
+		
+		var results []models.Cost
+		if err := cursor.All(ctx, &results); err != nil {
+			http.Error(w, "Failed to decode costs", http.StatusInternalServerError)
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(results)
+		
+	case http.MethodPost:
+		// Create new cost record
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read body", http.StatusBadRequest)
+			return
+		}
+		
+		var cost models.Cost
+		if err := json.Unmarshal(body, &cost); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		
+		// Input validation
+		if cost.VehicleID == "" {
+			http.Error(w, "vehicle_id is required", http.StatusBadRequest)
+			return
+		}
+		if cost.Category == "" {
+			http.Error(w, "category is required", http.StatusBadRequest)
+			return
+		}
+		if cost.Amount <= 0 {
+			http.Error(w, "amount must be positive", http.StatusBadRequest)
+			return
+		}
+		if cost.Status == "" {
+			cost.Status = "pending"
+		}
+		
+		// Store cost in database
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		
+		if err := h.Collection.InsertCost(ctx, cost); err != nil {
+			log.WithError(err).Error("Failed to insert cost")
+			http.Error(w, "Failed to create cost", http.StatusInternalServerError)
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id": primitive.NewObjectID().Hex(),
+			"message": "Cost created successfully",
+		})
+		
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 var vehicleCollectionHandler *VehicleCollectionHandler
 
@@ -589,12 +827,22 @@ func main() {
     }
     telemetryCollection := &db.MongoCollection{Collection: client.Database(mongoDBName).Collection("telemetry")}
     vehicleCollection := &db.MongoCollection{Collection: client.Database(mongoDBName).Collection("vehicles")}
+    tripCollection := &db.MongoCollection{Collection: client.Database(mongoDBName).Collection("trips")}
+    maintenanceCollection := &db.MongoCollection{Collection: client.Database(mongoDBName).Collection("maintenance")}
+    costCollection := &db.MongoCollection{Collection: client.Database(mongoDBName).Collection("costs")}
+    
     telemetryHandler := &TelemetryHandler{Collection: telemetryCollection}
     vehicleCollectionHandler = &VehicleCollectionHandler{Collection: vehicleCollection}
+    tripHandler := &TripHandler{Collection: tripCollection}
+    maintenanceHandler := &MaintenanceHandler{Collection: maintenanceCollection}
+    costHandler := &CostHandler{Collection: costCollection}
     telemetryMetricsHandler := TelemetryMetricsHandler{Collection: telemetryCollection}
 
     http.Handle("/api/telemetry", corsMiddleware(telemetryHandler))
     http.Handle("/api/vehicles", corsMiddleware(http.HandlerFunc(vehicleRouter)))
+    http.Handle("/api/trips", corsMiddleware(tripHandler))
+    http.Handle("/api/maintenance", corsMiddleware(maintenanceHandler))
+    http.Handle("/api/costs", corsMiddleware(costHandler))
     http.Handle("/api/telemetry/metrics", corsMiddleware(telemetryMetricsHandler))
     port := os.Getenv("PORT")
     if port == "" {

@@ -182,3 +182,196 @@ func (c *MongoCollection) DeleteVehicle(ctx context.Context, id string) error {
 	
 	return nil
 }
+
+// InsertTrip inserts a trip record into the collection.
+func (c *MongoCollection) InsertTrip(ctx context.Context, trip models.Trip) error {
+	trip.CreatedAt = time.Now()
+	trip.UpdatedAt = time.Now()
+	_, err := c.Collection.InsertOne(ctx, trip)
+	return err
+}
+
+// FindTrips queries trip records from the collection.
+func (c *MongoCollection) FindTrips(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (TripCursor, error) {
+	cursor, err := c.Collection.Find(ctx, filter, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &mongoTripCursor{cursor: cursor}, nil
+}
+
+// FindTripByID finds a trip by its ID.
+func (c *MongoCollection) FindTripByID(ctx context.Context, id string) (*models.Trip, error) {
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return nil, err
+	}
+	var trip models.Trip
+	err = c.Collection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&trip)
+	if err != nil {
+		return nil, err
+	}
+	return &trip, nil
+}
+
+// UpdateTrip updates a trip by its ID.
+func (c *MongoCollection) UpdateTrip(ctx context.Context, id string, trip models.Trip) error {
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return err
+	}
+	trip.UpdatedAt = time.Now()
+	_, err = c.Collection.UpdateOne(ctx, bson.M{"_id": objectID}, bson.M{"$set": trip})
+	return err
+}
+
+// DeleteTrip deletes a trip by its ID.
+func (c *MongoCollection) DeleteTrip(ctx context.Context, id string) error {
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return err
+	}
+	_, err = c.Collection.DeleteOne(ctx, bson.M{"_id": objectID})
+	return err
+}
+
+// InsertMaintenance inserts a maintenance record into the collection.
+func (c *MongoCollection) InsertMaintenance(ctx context.Context, maintenance models.Maintenance) error {
+	maintenance.CreatedAt = time.Now()
+	maintenance.UpdatedAt = time.Now()
+	_, err := c.Collection.InsertOne(ctx, maintenance)
+	return err
+}
+
+// FindMaintenance queries maintenance records from the collection.
+func (c *MongoCollection) FindMaintenance(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (MaintenanceCursor, error) {
+	cursor, err := c.Collection.Find(ctx, filter, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &mongoMaintenanceCursor{cursor: cursor}, nil
+}
+
+// FindMaintenanceByID finds a maintenance record by its ID.
+func (c *MongoCollection) FindMaintenanceByID(ctx context.Context, id string) (*models.Maintenance, error) {
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return nil, err
+	}
+	var maintenance models.Maintenance
+	err = c.Collection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&maintenance)
+	if err != nil {
+		return nil, err
+	}
+	return &maintenance, nil
+}
+
+// UpdateMaintenance updates a maintenance record by its ID.
+func (c *MongoCollection) UpdateMaintenance(ctx context.Context, id string, maintenance models.Maintenance) error {
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return err
+	}
+	maintenance.UpdatedAt = time.Now()
+	_, err = c.Collection.UpdateOne(ctx, bson.M{"_id": objectID}, bson.M{"$set": maintenance})
+	return err
+}
+
+// DeleteMaintenance deletes a maintenance record by its ID.
+func (c *MongoCollection) DeleteMaintenance(ctx context.Context, id string) error {
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return err
+	}
+	_, err = c.Collection.DeleteOne(ctx, bson.M{"_id": objectID})
+	return err
+}
+
+// InsertCost inserts a cost record into the collection.
+func (c *MongoCollection) InsertCost(ctx context.Context, cost models.Cost) error {
+	cost.CreatedAt = time.Now()
+	cost.UpdatedAt = time.Now()
+	_, err := c.Collection.InsertOne(ctx, cost)
+	return err
+}
+
+// FindCosts queries cost records from the collection.
+func (c *MongoCollection) FindCosts(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (CostCursor, error) {
+	cursor, err := c.Collection.Find(ctx, filter, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &mongoCostCursor{cursor: cursor}, nil
+}
+
+// FindCostByID finds a cost record by its ID.
+func (c *MongoCollection) FindCostByID(ctx context.Context, id string) (*models.Cost, error) {
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return nil, err
+	}
+	var cost models.Cost
+	err = c.Collection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&cost)
+	if err != nil {
+		return nil, err
+	}
+	return &cost, nil
+}
+
+// UpdateCost updates a cost record by its ID.
+func (c *MongoCollection) UpdateCost(ctx context.Context, id string, cost models.Cost) error {
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return err
+	}
+	cost.UpdatedAt = time.Now()
+	_, err = c.Collection.UpdateOne(ctx, bson.M{"_id": objectID}, bson.M{"$set": cost})
+	return err
+}
+
+// DeleteCost deletes a cost record by its ID.
+func (c *MongoCollection) DeleteCost(ctx context.Context, id string) error {
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return err
+	}
+	_, err = c.Collection.DeleteOne(ctx, bson.M{"_id": objectID})
+	return err
+}
+
+// Cursor implementations
+type mongoTripCursor struct {
+	cursor *mongo.Cursor
+}
+
+func (c *mongoTripCursor) All(ctx context.Context, out interface{}) error {
+	return c.cursor.All(ctx, out)
+}
+
+func (c *mongoTripCursor) Close(ctx context.Context) error {
+	return c.cursor.Close(ctx)
+}
+
+type mongoMaintenanceCursor struct {
+	cursor *mongo.Cursor
+}
+
+func (c *mongoMaintenanceCursor) All(ctx context.Context, out interface{}) error {
+	return c.cursor.All(ctx, out)
+}
+
+func (c *mongoMaintenanceCursor) Close(ctx context.Context) error {
+	return c.cursor.Close(ctx)
+}
+
+type mongoCostCursor struct {
+	cursor *mongo.Cursor
+}
+
+func (c *mongoCostCursor) All(ctx context.Context, out interface{}) error {
+	return c.cursor.All(ctx, out)
+}
+
+func (c *mongoCostCursor) Close(ctx context.Context) error {
+	return c.cursor.Close(ctx)
+}
