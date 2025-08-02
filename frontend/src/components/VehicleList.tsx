@@ -35,6 +35,10 @@ interface VehicleRowProps {
 const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle }) => {
   const [expanded, setExpanded] = useState(false);
 
+  const getVehicleType = (vehicle: Telemetry): 'ICE' | 'EV' => {
+    return vehicle.battery_level !== undefined ? 'EV' : 'ICE';
+  };
+
   const getVehicleIcon = (type: 'ICE' | 'EV') => {
     return type === 'EV' ? (
       <EvIcon color="success" fontSize="small" />
@@ -61,6 +65,8 @@ const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle }) => {
     return `${location.lat.toFixed(4)}, ${location.lon.toFixed(4)}`;
   };
 
+  const vehicleType = getVehicleType(vehicle);
+
   return (
     <>
       <TableRow hover>
@@ -74,7 +80,7 @@ const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle }) => {
         </TableCell>
         <TableCell>
           <Box display="flex" alignItems="center">
-            {getVehicleIcon(vehicle.type)}
+            {getVehicleIcon(vehicleType)}
             <Typography variant="body2" ml={1}>
               {vehicle.vehicle_id}
             </Typography>
@@ -82,9 +88,9 @@ const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle }) => {
         </TableCell>
         <TableCell>
           <Chip
-            label={vehicle.type}
+            label={vehicleType}
             size="small"
-            color={vehicle.type === 'EV' ? 'success' : 'primary'}
+            color={vehicleType === 'EV' ? 'success' : 'primary'}
           />
         </TableCell>
         <TableCell>

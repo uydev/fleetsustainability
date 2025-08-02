@@ -16,8 +16,8 @@ interface FleetMapProps {
 const FleetMap: React.FC<FleetMapProps> = ({ telemetry }) => {
   // Simple map visualization - in a real app, you'd use a proper mapping library
   // like Mapbox, Google Maps, or Leaflet
-  const centerLat = 51.5074; // London
-  const centerLon = -0.1278;
+  const centerLat = 40.7128; // New York
+  const centerLon = -74.0060;
   const mapSize = 400;
 
   const getVehicleIcon = (type: 'ICE' | 'EV') => {
@@ -36,7 +36,12 @@ const FleetMap: React.FC<FleetMapProps> = ({ telemetry }) => {
     return status === 'active' ? '#4caf50' : '#f44336';
   };
 
-  if (telemetry.length === 0) {
+  // Determine vehicle type based on available data
+  const getVehicleType = (vehicle: Telemetry): 'ICE' | 'EV' => {
+    return vehicle.battery_level !== undefined ? 'EV' : 'ICE';
+  };
+
+  if (!telemetry || telemetry.length === 0) {
     return (
       <Box
         display="flex"
@@ -54,12 +59,13 @@ const FleetMap: React.FC<FleetMapProps> = ({ telemetry }) => {
   }
 
   return (
-    <Box>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Simple Map Visualization */}
       <Box
         position="relative"
         width="100%"
-        height={mapSize}
+        flex={1}
+        minHeight={300}
         bgcolor="#e3f2fd"
         borderRadius={1}
         border="2px solid #2196f3"
@@ -87,17 +93,19 @@ const FleetMap: React.FC<FleetMapProps> = ({ telemetry }) => {
           const latDiff = vehicle.location.lat - centerLat;
           const lonDiff = vehicle.location.lon - centerLon;
           
-          // Scale to fit map (rough approximation)
-          const x = 50 + (lonDiff * 1000); // Scale longitude
-          const y = 50 - (latDiff * 1000); // Scale latitude (inverted for map)
+          // Scale to fit map (better approximation for NYC area)
+          const x = 50 + (lonDiff * 200); // Scale longitude
+          const y = 50 - (latDiff * 200); // Scale latitude (inverted for map)
+          
+          const vehicleType = getVehicleType(vehicle);
           
           return (
             <Box
               key={`${vehicle.vehicle_id}-${index}`}
               sx={{
                 position: 'absolute',
-                left: `${Math.max(0, Math.min(100, x))}%`,
-                top: `${Math.max(0, Math.min(100, y))}%`,
+                left: `${Math.max(5, Math.min(95, x))}%`,
+                top: `${Math.max(5, Math.min(95, y))}%`,
                 transform: 'translate(-50%, -50%)',
                 display: 'flex',
                 flexDirection: 'column',
@@ -110,11 +118,11 @@ const FleetMap: React.FC<FleetMapProps> = ({ telemetry }) => {
             >
               <Box
                 sx={{
-                  color: getVehicleColor(vehicle.type),
+                  color: getVehicleColor(vehicleType),
                   filter: vehicle.status === 'inactive' ? 'grayscale(100%)' : 'none',
                 }}
               >
-                {getVehicleIcon(vehicle.type)}
+                {getVehicleIcon(vehicleType)}
               </Box>
               
               {/* Status indicator */}
@@ -193,11 +201,11 @@ const FleetMap: React.FC<FleetMapProps> = ({ telemetry }) => {
       </Box>
 
       {/* Fleet Summary */}
-      <Box mt={2}>
+      <Box mt={1}>
         <Typography variant="body2" color="text.secondary">
           Fleet Overview: {telemetry.length} vehicles
-          ({telemetry.filter(v => v.type === 'EV').length} EV, 
-          {telemetry.filter(v => v.type === 'ICE').length} ICE)
+          ({telemetry.filter(v => getVehicleType(v) === 'EV').length} EV, 
+          {telemetry.filter(v => getVehicleType(v) === 'ICE').length} ICE)
         </Typography>
       </Box>
     </Box>

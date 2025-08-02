@@ -87,21 +87,25 @@ const Dashboard: React.FC = () => {
       <Grid container spacing={3}>
         {/* Fleet Map */}
         <Grid item xs={12} lg={8}>
-          <Paper sx={{ p: 2, height: 400 }}>
+          <Paper sx={{ p: 2, height: 400, display: 'flex', flexDirection: 'column' }}>
             <Typography variant="h6" gutterBottom>
               Fleet Overview
             </Typography>
-            <FleetMap telemetry={telemetry} />
+            <Box sx={{ flex: 1, minHeight: 0 }}>
+              <FleetMap telemetry={telemetry} />
+            </Box>
           </Paper>
         </Grid>
 
         {/* Metrics Panel */}
         <Grid item xs={12} lg={4}>
-          <Paper sx={{ p: 2, height: 400 }}>
+          <Paper sx={{ p: 2, height: 400, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <Typography variant="h6" gutterBottom>
               Fleet Metrics
             </Typography>
-            {metrics && <MetricsPanel metrics={metrics} />}
+            <Box sx={{ flex: 1, overflow: 'auto' }}>
+              {metrics && <MetricsPanel metrics={metrics} />}
+            </Box>
           </Paper>
         </Grid>
 
@@ -133,7 +137,7 @@ const Dashboard: React.FC = () => {
                     <EvIcon color="success" sx={{ mr: 1 }} />
                     <Box>
                       <Typography variant="h6">
-                        {telemetry?.filter(t => t.type === 'EV').length || 0}
+                        {telemetry?.filter(t => t.battery_level !== undefined).length || 0}
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
                         Electric Vehicles
@@ -151,7 +155,7 @@ const Dashboard: React.FC = () => {
                     <GasIcon color="warning" sx={{ mr: 1 }} />
                     <Box>
                       <Typography variant="h6">
-                        {telemetry?.filter(t => t.type === 'ICE').length || 0}
+                        {telemetry?.filter(t => t.fuel_level !== undefined).length || 0}
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
                         ICE Vehicles

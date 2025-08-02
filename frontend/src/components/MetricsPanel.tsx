@@ -48,11 +48,11 @@ const MetricsPanel: React.FC<MetricsPanelProps> = ({ metrics }) => {
   };
 
   return (
-    <Box>
-      <Grid container spacing={2}>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Grid container spacing={1} sx={{ flex: 1 }}>
         {/* Emissions Card */}
         <Grid item xs={12}>
-          <Paper sx={{ p: 2 }}>
+          <Paper sx={{ p: 1.5 }}>
             <Typography variant="h6" gutterBottom>
               Total Emissions
             </Typography>
@@ -67,7 +67,7 @@ const MetricsPanel: React.FC<MetricsPanelProps> = ({ metrics }) => {
 
         {/* EV Percentage Card */}
         <Grid item xs={12}>
-          <Paper sx={{ p: 2 }}>
+          <Paper sx={{ p: 1.5 }}>
             <Typography variant="h6" gutterBottom>
               Electric Vehicle Percentage
             </Typography>
@@ -96,19 +96,27 @@ const MetricsPanel: React.FC<MetricsPanelProps> = ({ metrics }) => {
 
         {/* Fleet Composition Chart */}
         <Grid item xs={12}>
-          <Paper sx={{ p: 2 }}>
-            <Typography variant="h6" gutterBottom>
+          <Paper sx={{ p: 1.5, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <Typography variant="h6" gutterBottom align="center">
               Fleet Composition
             </Typography>
-            <Box height={200}>
+            <Box 
+              sx={{ 
+                width: '100%', 
+                height: 150, 
+                display: 'flex', 
+                justifyContent: 'center', 
+                alignItems: 'center' 
+              }}
+            >
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
                     data={pieData}
                     cx="50%"
                     cy="50%"
-                    innerRadius={40}
-                    outerRadius={80}
+                    innerRadius={30}
+                    outerRadius={60}
                     paddingAngle={5}
                     dataKey="value"
                   >
@@ -122,7 +130,7 @@ const MetricsPanel: React.FC<MetricsPanelProps> = ({ metrics }) => {
                 </PieChart>
               </ResponsiveContainer>
             </Box>
-            <Box display="flex" justifyContent="space-around" mt={1}>
+            <Box display="flex" justifyContent="space-around" mt={1} width="100%">
               <Box display="flex" alignItems="center">
                 <Box
                   width={12}
@@ -149,7 +157,7 @@ const MetricsPanel: React.FC<MetricsPanelProps> = ({ metrics }) => {
 
         {/* Total Records */}
         <Grid item xs={12}>
-          <Paper sx={{ p: 2 }}>
+          <Paper sx={{ p: 1.5 }}>
             <Typography variant="h6" gutterBottom>
               Data Points
             </Typography>
