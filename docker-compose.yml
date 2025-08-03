@@ -1,13 +1,10 @@
-version: '3.8'
 services:
   app:
     build: .
     container_name: fleet-sustainability-app
-    volumes:
-      - .:/app
     ports:
-      - "8080:8080"
-    command: ["go", "run", "./cmd/main.go"]
+      - "8081:8080"
+    command: ["./fleet-backend"]
     environment:
       - MONGO_URI=mongodb://root:example@mongo:27017
       - MONGO_DB=fleet
