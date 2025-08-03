@@ -7,7 +7,15 @@ import {
   Container,
   Tabs,
   Tab,
+  AppBar,
+  Toolbar,
+  Button,
+  Avatar,
+  Menu,
+  MenuItem,
+  IconButton,
 } from '@mui/material';
+import { AccountCircle, Logout } from '@mui/icons-material';
 import FleetMap from './FleetMap';
 import MetricsPanel from './MetricsPanel';
 import VehicleList from './VehicleList';
@@ -18,6 +26,7 @@ import TripManagement from './TripManagement';
 import MaintenanceManagement from './MaintenanceManagement';
 import CostManagement from './CostManagement';
 import apiService from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 import { Telemetry, FleetMetrics, Vehicle } from '../types';
 
 interface TabPanelProps {
@@ -43,6 +52,7 @@ function TabPanel(props: TabPanelProps) {
 }
 
 const Dashboard: React.FC = () => {
+  const { user, logout } = useAuth();
   const [telemetry, setTelemetry] = useState<Telemetry[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [metrics, setMetrics] = useState<FleetMetrics>({
@@ -53,6 +63,7 @@ const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tabValue, setTabValue] = useState(0);
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
 
   const loadDashboardData = useCallback(async () => {
     setLoading(true);
@@ -102,6 +113,19 @@ const Dashboard: React.FC = () => {
     setTabValue(newValue);
   };
 
+  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleMenuClose = () => {
+    setAnchorEl(null);
+  };
+
+  const handleLogout = () => {
+    logout();
+    handleMenuClose();
+  };
+
   if (loading && telemetry.length === 0) {
     return (
       <Container maxWidth="xl">
@@ -122,10 +146,50 @@ const Dashboard: React.FC = () => {
   const iceCount = telemetry?.filter(t => t.fuel_level !== undefined && t.fuel_level !== null).length || 0;
 
   return (
-    <Container maxWidth="xl" sx={{ py: 4 }}>
-      <Typography variant="h4" component="h1" gutterBottom>
-        Fleet Sustainability Dashboard
-      </Typography>
+    <>
+      <AppBar position="static">
+        <Toolbar>
+          <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+            Fleet Sustainability Dashboard
+          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="body2" color="inherit">
+              {user?.firstName} {user?.lastName} ({user?.role})
+            </Typography>
+            <IconButton
+              size="large"
+              aria-label="account of current user"
+              aria-controls="menu-appbar"
+              aria-haspopup="true"
+              onClick={handleMenuOpen}
+              color="inherit"
+            >
+              <AccountCircle />
+            </IconButton>
+            <Menu
+              id="menu-appbar"
+              anchorEl={anchorEl}
+              anchorOrigin={{
+                vertical: 'top',
+                horizontal: 'right',
+              }}
+              keepMounted
+              transformOrigin={{
+                vertical: 'top',
+                horizontal: 'right',
+              }}
+              open={Boolean(anchorEl)}
+              onClose={handleMenuClose}
+            >
+              <MenuItem onClick={handleLogout}>
+                <Logout sx={{ mr: 1 }} />
+                Logout
+              </MenuItem>
+            </Menu>
+          </Box>
+        </Toolbar>
+      </AppBar>
+      <Container maxWidth="xl" sx={{ py: 4 }}>
 
       <TimeRangeSelector onTimeRangeChange={handleTimeRangeChange} />
 
@@ -182,6 +246,7 @@ const Dashboard: React.FC = () => {
         <CostManagement timeRange={currentTimeRange} />
       </TabPanel>
     </Container>
+    </>
   );
 };
 

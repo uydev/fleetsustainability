@@ -33,9 +33,16 @@ class ApiService {
       (response) => response,
       (error) => {
         if (error.response?.status === 401) {
-          // Handle unauthorized access
-          localStorage.removeItem('auth_token');
-          window.location.href = '/login';
+          // Only handle unauthorized access for this specific application
+          // Check if the error is from our API base URL to avoid affecting other apps
+          if (error.config?.url?.includes(API_BASE_URL) || error.config?.baseURL?.includes(API_BASE_URL)) {
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('user');
+            // Only redirect if we're on the fleet sustainability domain
+            if (window.location.hostname === 'localhost' && window.location.port === '3000') {
+              window.location.href = '/login';
+            }
+          }
         }
         return Promise.reject(error);
       }
@@ -158,16 +165,48 @@ class ApiService {
   }
 
   // Authentication
-  async login(token: string): Promise<void> {
-    localStorage.setItem('auth_token', token);
+  async login(username: string, password: string): Promise<{ token: string; user: any }> {
+    const response = await this.api.post('/api/auth/login', { username, password });
+    return response.data;
+  }
+
+  async register(userData: any): Promise<{ token: string; user: any }> {
+    const response = await this.api.post('/api/auth/register', userData);
+    return response.data;
+  }
+
+  async getProfile(): Promise<any> {
+    const response = await this.api.get('/api/auth/profile');
+    return response.data;
+  }
+
+  async updateProfile(profileData: any): Promise<any> {
+    const response = await this.api.put('/api/auth/profile', profileData);
+    return response.data;
+  }
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<any> {
+    const response = await this.api.post('/api/auth/change-password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
+    return response.data;
   }
 
   logout(): void {
+    // Only clear fleet sustainability specific items
     localStorage.removeItem('auth_token');
+    localStorage.removeItem('user');
+    // Don't clear other localStorage items that might be used by other applications
   }
 
   isAuthenticated(): boolean {
     return !!localStorage.getItem('auth_token');
+  }
+
+  getCurrentUser(): any {
+    const userStr = localStorage.getItem('user');
+    return userStr ? JSON.parse(userStr) : null;
   }
 }
 

@@ -8,10 +8,15 @@ import (
     log "github.com/sirupsen/logrus"
     "net/http"
     "os"
+    "os/signal"
+    "syscall"
     "time"
 
     "github.com/ukydev/fleet-sustainability/internal/db"
     "github.com/ukydev/fleet-sustainability/internal/models"
+    "github.com/ukydev/fleet-sustainability/internal/auth"
+    "github.com/ukydev/fleet-sustainability/internal/handlers"
+    "github.com/ukydev/fleet-sustainability/internal/middleware"
     "go.mongodb.org/mongo-driver/bson"
     "go.mongodb.org/mongo-driver/bson/primitive"
     "go.mongodb.org/mongo-driver/mongo/options"
@@ -155,6 +160,23 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         }
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(results)
+    case http.MethodDelete:
+        // Delete all telemetry records
+        ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+        defer cancel()
+        
+        // Delete all telemetry records
+        if err := h.Collection.DeleteAll(ctx); err != nil {
+            log.WithError(err).Error("Failed to delete telemetry records")
+            http.Error(w, "Failed to delete telemetry records", http.StatusInternalServerError)
+            return
+        }
+        
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusOK)
+        json.NewEncoder(w).Encode(map[string]interface{}{
+            "message": "All telemetry records deleted successfully",
+        })
     default:
         http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
     }
@@ -503,6 +525,7 @@ type VehicleCollectionHandler struct {
 
 // ServeHTTP processes HTTP requests for vehicle collection operations.
 func (h *VehicleCollectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log.Infof("VehicleCollectionHandler: %s %s", r.Method, r.URL.Path)
 	switch r.Method {
 	case http.MethodGet:
 		// Get all vehicles with optional time filtering
@@ -635,6 +658,22 @@ func (h *VehicleCollectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 			"message": "Vehicle created successfully",
 		})
 		
+	case http.MethodDelete:
+		log.Infof("VehicleCollectionHandler DELETE hit")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := h.Collection.DeleteAll(ctx); err != nil {
+			log.WithError(err).Error("Failed to delete all vehicles")
+			http.Error(w, "Failed to delete all vehicles", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "All vehicles deleted successfully",
+		})
+		return
+		
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -738,6 +777,24 @@ func (h *TripHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"message": "Trip created successfully",
 		})
 		
+	case http.MethodDelete:
+		// Delete all trip records
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		
+		// Delete all trip records
+		if err := h.Collection.DeleteAll(ctx); err != nil {
+			log.WithError(err).Error("Failed to delete trip records")
+			http.Error(w, "Failed to delete trip records", http.StatusInternalServerError)
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "All trip records deleted successfully",
+		})
+		
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -750,6 +807,7 @@ type MaintenanceHandler struct {
 
 // ServeHTTP processes HTTP requests for maintenance management.
 func (h *MaintenanceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log.Infof("MaintenanceHandler: %s %s", r.Method, r.URL.Path)
 	switch r.Method {
 	case http.MethodGet:
 		// Get all maintenance records with optional time filtering
@@ -841,6 +899,22 @@ func (h *MaintenanceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"message": "Maintenance created successfully",
 		})
 		
+	case http.MethodDelete:
+		log.Infof("MaintenanceHandler DELETE hit")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := h.Collection.DeleteAll(ctx); err != nil {
+			log.WithError(err).Error("Failed to delete maintenance records")
+			http.Error(w, "Failed to delete maintenance records", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "All maintenance records deleted successfully",
+		})
+		return
+		
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -853,6 +927,7 @@ type CostHandler struct {
 
 // ServeHTTP processes HTTP requests for cost management.
 func (h *CostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log.Infof("CostHandler: %s %s", r.Method, r.URL.Path)
 	switch r.Method {
 	case http.MethodGet:
 		// Get all cost records with optional time filtering
@@ -948,6 +1023,22 @@ func (h *CostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"message": "Cost created successfully",
 		})
 		
+	case http.MethodDelete:
+		log.Infof("CostHandler DELETE hit")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := h.Collection.DeleteAll(ctx); err != nil {
+			log.WithError(err).Error("Failed to delete cost records")
+			http.Error(w, "Failed to delete cost records", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "All cost records deleted successfully",
+		})
+		return
+		
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -976,25 +1067,52 @@ func main() {
     tripCollection := &db.MongoCollection{Collection: client.Database(mongoDBName).Collection("trips")}
     maintenanceCollection := &db.MongoCollection{Collection: client.Database(mongoDBName).Collection("maintenance")}
     costCollection := &db.MongoCollection{Collection: client.Database(mongoDBName).Collection("costs")}
+    userCollection := &db.MongoUserCollection{Collection: client.Database(mongoDBName).Collection("users")}
     
+    // Initialize authentication services
+    authService, err := auth.NewService()
+    if err != nil {
+        log.WithError(err).Fatal("Failed to initialize auth service")
+    }
+    
+    // Initialize handlers
     telemetryHandler := &TelemetryHandler{Collection: telemetryCollection}
     vehicleCollectionHandler = &VehicleCollectionHandler{Collection: vehicleCollection}
     tripHandler := &TripHandler{Collection: tripCollection}
     maintenanceHandler := &MaintenanceHandler{Collection: maintenanceCollection}
     costHandler := &CostHandler{Collection: costCollection}
     telemetryMetricsHandler := TelemetryMetricsHandler{Collection: telemetryCollection}
+    authHandler := handlers.NewAuthHandler(authService, userCollection)
+    
+    // Initialize middleware
+    authMiddleware := middleware.NewAuthMiddleware(authService)
+    // rateLimitMiddleware := middleware.NewRateLimitMiddleware() // Temporarily disabled for development
 
-    http.Handle("/api/telemetry", corsMiddleware(telemetryHandler))
-    http.HandleFunc("/api/vehicles", func(w http.ResponseWriter, r *http.Request) {
-		corsMiddleware(http.HandlerFunc(vehicleRouter)).ServeHTTP(w, r)
-	})
-	http.HandleFunc("/api/vehicles/", func(w http.ResponseWriter, r *http.Request) {
-		corsMiddleware(http.HandlerFunc(vehicleRouter)).ServeHTTP(w, r)
-	})
-    http.Handle("/api/trips", corsMiddleware(tripHandler))
-    http.Handle("/api/maintenance", corsMiddleware(maintenanceHandler))
-    http.Handle("/api/costs", corsMiddleware(costHandler))
-    http.Handle("/api/telemetry/metrics", corsMiddleware(telemetryMetricsHandler))
+    // Authentication routes (no auth required)
+    http.HandleFunc("/api/auth/login", func(w http.ResponseWriter, r *http.Request) {
+        corsMiddleware(http.HandlerFunc(authHandler.Login)).ServeHTTP(w, r)
+    })
+    http.HandleFunc("/api/auth/register", func(w http.ResponseWriter, r *http.Request) {
+        corsMiddleware(http.HandlerFunc(authHandler.Register)).ServeHTTP(w, r)
+    })
+    
+    // Protected routes (require authentication)
+    // Temporarily disable rate limiting for development
+    http.Handle("/api/telemetry", corsMiddleware(authMiddleware.Authenticate(telemetryHandler)))
+    http.Handle("/api/vehicles", corsMiddleware(authMiddleware.Authenticate(vehicleCollectionHandler)))
+    http.Handle("/api/vehicles/", corsMiddleware(authMiddleware.Authenticate(&VehicleHandler{Collection: vehicleCollection})))
+    http.Handle("/api/trips", corsMiddleware(authMiddleware.Authenticate(tripHandler)))
+    http.Handle("/api/maintenance", corsMiddleware(authMiddleware.Authenticate(maintenanceHandler)))
+    http.Handle("/api/costs", corsMiddleware(authMiddleware.Authenticate(costHandler)))
+    http.Handle("/api/telemetry/metrics", corsMiddleware(authMiddleware.Authenticate(telemetryMetricsHandler)))
+    
+    // User profile routes (require authentication)
+    http.HandleFunc("/api/auth/profile", func(w http.ResponseWriter, r *http.Request) {
+        corsMiddleware(authMiddleware.Authenticate(http.HandlerFunc(authHandler.GetProfile))).ServeHTTP(w, r)
+    })
+    http.HandleFunc("/api/auth/change-password", func(w http.ResponseWriter, r *http.Request) {
+        corsMiddleware(authMiddleware.Authenticate(http.HandlerFunc(authHandler.ChangePassword))).ServeHTTP(w, r)
+    })
     port := os.Getenv("PORT")
     if port == "" {
         port = "8080"
@@ -1004,11 +1122,43 @@ func main() {
     certFile := os.Getenv("TLS_CERT_FILE")
     keyFile := os.Getenv("TLS_KEY_FILE")
 
-    if useHTTPS == "true" && certFile != "" && keyFile != "" {
-        log.WithField("port", port).Info("HTTPS server listening")
-        log.Fatal(http.ListenAndServeTLS(":"+port, certFile, keyFile, nil))
+    // Create server with graceful shutdown
+    server := &http.Server{
+        Addr:    ":" + port,
+        Handler: nil, // Use default ServeMux
+    }
+
+    // Channel to listen for interrupt signal
+    stop := make(chan os.Signal, 1)
+    signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+    // Start server in a goroutine
+    go func() {
+        if useHTTPS == "true" && certFile != "" && keyFile != "" {
+            log.WithField("port", port).Info("HTTPS server listening")
+            if err := server.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
+                log.WithError(err).Fatal("Server failed to start")
+            }
+        } else {
+            log.WithField("port", port).Info("HTTP server listening")
+            if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+                log.WithError(err).Fatal("Server failed to start")
+            }
+        }
+    }()
+
+    // Wait for interrupt signal
+    <-stop
+    log.Info("Shutting down server gracefully...")
+
+    // Create context with timeout for graceful shutdown
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+
+    // Shutdown server gracefully
+    if err := server.Shutdown(ctx); err != nil {
+        log.WithError(err).Error("Server forced to shutdown")
     } else {
-        log.WithField("port", port).Info("HTTP server listening")
-        log.Fatal(http.ListenAndServe(":"+port, nil))
+        log.Info("Server exited gracefully")
     }
 }

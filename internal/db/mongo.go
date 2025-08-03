@@ -68,6 +68,15 @@ func (c *MongoCollection) Find(ctx context.Context, filter interface{}, opts ...
     return &mongoTelemetryCursor{cursor: cursor}, nil
 }
 
+// DeleteAll deletes all telemetry records from the collection.
+func (c *MongoCollection) DeleteAll(ctx context.Context) error {
+    if c.Collection == nil {
+        return fmt.Errorf("mongo collection is nil")
+    }
+    _, err := c.Collection.DeleteMany(ctx, bson.M{})
+    return err
+}
+
 // mongoVehicleCursor wraps a MongoDB cursor for vehicle queries.
 type mongoVehicleCursor struct {
 	cursor *mongo.Cursor
@@ -179,6 +188,8 @@ func (c *MongoCollection) DeleteVehicle(ctx context.Context, id string) error {
 	
 	return nil
 }
+
+
 
 // InsertTrip inserts a trip record into the collection.
 func (c *MongoCollection) InsertTrip(ctx context.Context, trip models.Trip) error {
