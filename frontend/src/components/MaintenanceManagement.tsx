@@ -21,7 +21,11 @@ import MaintenanceForm from './MaintenanceForm';
 import apiService from '../services/api';
 import { Maintenance } from '../types';
 
-const MaintenanceManagement: React.FC = () => {
+interface MaintenanceManagementProps {
+  timeRange?: { from?: string; to?: string };
+}
+
+const MaintenanceManagement: React.FC<MaintenanceManagementProps> = ({ timeRange }) => {
   const [maintenance, setMaintenance] = useState<Maintenance[]>([]);
   const [loading, setLoading] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -34,7 +38,7 @@ const MaintenanceManagement: React.FC = () => {
   const loadMaintenance = async () => {
     setLoading(true);
     try {
-      const data = await apiService.getMaintenance();
+      const data = await apiService.getMaintenance(timeRange);
       setMaintenance(data);
     } catch (error) {
       console.error('Error loading maintenance:', error);
@@ -50,7 +54,7 @@ const MaintenanceManagement: React.FC = () => {
 
   useEffect(() => {
     loadMaintenance();
-  }, []);
+  }, [timeRange]);
 
   const handleAddMaintenance = async (maintenanceData: Omit<Maintenance, 'id'>) => {
     try {

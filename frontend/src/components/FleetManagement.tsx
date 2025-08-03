@@ -24,7 +24,11 @@ import VehicleForm from './VehicleForm';
 import apiService from '../services/api';
 import { Vehicle } from '../types';
 
-const FleetManagement: React.FC = () => {
+interface FleetManagementProps {
+  timeRange?: { from?: string; to?: string };
+}
+
+const FleetManagement: React.FC<FleetManagementProps> = ({ timeRange }) => {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -38,7 +42,7 @@ const FleetManagement: React.FC = () => {
   const loadVehicles = async () => {
     setLoading(true);
     try {
-      const data = await apiService.getVehicles();
+      const data = await apiService.getVehicles(timeRange);
       setVehicles(data);
     } catch (error) {
       console.error('Error loading vehicles:', error);
@@ -54,7 +58,7 @@ const FleetManagement: React.FC = () => {
 
   useEffect(() => {
     loadVehicles();
-  }, []);
+  }, [timeRange]);
 
   const handleAddVehicle = async (vehicle: Omit<Vehicle, 'id'>) => {
     try {

@@ -67,8 +67,12 @@ class ApiService {
   }
 
   // Vehicles endpoints
-  async getVehicles(): Promise<Vehicle[]> {
-    const response = await this.api.get('/api/vehicles');
+  async getVehicles(timeRange?: TimeRange): Promise<Vehicle[]> {
+    const params = new URLSearchParams();
+    if (timeRange?.from) params.append('from', timeRange.from);
+    if (timeRange?.to) params.append('to', timeRange.to);
+    
+    const response = await this.api.get(`/api/vehicles?${params.toString()}`);
     return response.data || [];
   }
 

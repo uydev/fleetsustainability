@@ -23,7 +23,11 @@ import TelemetryForm from './TelemetryForm';
 import apiService from '../services/api';
 import { Telemetry } from '../types';
 
-const TelemetryManagement: React.FC = () => {
+interface TelemetryManagementProps {
+  timeRange?: { from?: string; to?: string };
+}
+
+const TelemetryManagement: React.FC<TelemetryManagementProps> = ({ timeRange }) => {
   const [telemetry, setTelemetry] = useState<Telemetry[]>([]);
   const [loading, setLoading] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -36,7 +40,7 @@ const TelemetryManagement: React.FC = () => {
   const loadTelemetry = async () => {
     setLoading(true);
     try {
-      const data = await apiService.getTelemetry();
+      const data = await apiService.getTelemetry(timeRange);
       setTelemetry(data);
     } catch (error) {
       console.error('Error loading telemetry:', error);
@@ -52,7 +56,7 @@ const TelemetryManagement: React.FC = () => {
 
   useEffect(() => {
     loadTelemetry();
-  }, []);
+  }, [timeRange]);
 
   const handleAddTelemetry = async (telemetryData: Omit<Telemetry, 'id'>) => {
     try {

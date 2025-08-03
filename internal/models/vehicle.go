@@ -1,6 +1,9 @@
 package models
 
-import "go.mongodb.org/mongo-driver/bson/primitive"
+import (
+	"time"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+)
 
 // Vehicle represents a fleet vehicle.
 type Vehicle struct {
@@ -11,4 +14,5 @@ type Vehicle struct {
 	Year            int                `bson:"year" json:"year"`
 	CurrentLocation Location           `bson:"current_location" json:"current_location"`
 	Status          string             `bson:"status" json:"status"` // "active" or "inactive"
+	CreatedAt       time.Time          `bson:"created_at" json:"created_at"`
 } 

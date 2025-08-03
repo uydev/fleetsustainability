@@ -21,7 +21,11 @@ import CostForm from './CostForm';
 import apiService from '../services/api';
 import { Cost } from '../types';
 
-const CostManagement: React.FC = () => {
+interface CostManagementProps {
+  timeRange?: { from?: string; to?: string };
+}
+
+const CostManagement: React.FC<CostManagementProps> = ({ timeRange }) => {
   const [costs, setCosts] = useState<Cost[]>([]);
   const [loading, setLoading] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -34,7 +38,7 @@ const CostManagement: React.FC = () => {
   const loadCosts = async () => {
     setLoading(true);
     try {
-      const data = await apiService.getCosts();
+      const data = await apiService.getCosts(timeRange);
       setCosts(data);
     } catch (error) {
       console.error('Error loading costs:', error);
@@ -50,7 +54,7 @@ const CostManagement: React.FC = () => {
 
   useEffect(() => {
     loadCosts();
-  }, []);
+  }, [timeRange]);
 
   const handleAddCost = async (costData: Omit<Cost, 'id'>) => {
     try {

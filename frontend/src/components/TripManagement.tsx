@@ -21,7 +21,11 @@ import TripForm from './TripForm';
 import apiService from '../services/api';
 import { Trip } from '../types';
 
-const TripManagement: React.FC = () => {
+interface TripManagementProps {
+  timeRange?: { from?: string; to?: string };
+}
+
+const TripManagement: React.FC<TripManagementProps> = ({ timeRange }) => {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -34,7 +38,7 @@ const TripManagement: React.FC = () => {
   const loadTrips = async () => {
     setLoading(true);
     try {
-      const data = await apiService.getTrips();
+      const data = await apiService.getTrips(timeRange);
       setTrips(data);
     } catch (error) {
       console.error('Error loading trips:', error);
@@ -50,7 +54,7 @@ const TripManagement: React.FC = () => {
 
   useEffect(() => {
     loadTrips();
-  }, []);
+  }, [timeRange]);
 
   const handleAddTrip = async (tripData: Omit<Trip, 'id'>) => {
     try {

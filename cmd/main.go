@@ -506,11 +506,41 @@ type VehicleCollectionHandler struct {
 func (h *VehicleCollectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		// Get all vehicles
+		// Get all vehicles with optional time filtering
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		
-		cursor, err := h.Collection.FindVehicles(ctx, bson.M{})
+		// Parse time range parameters
+		fromStr := r.URL.Query().Get("from")
+		toStr := r.URL.Query().Get("to")
+		var filter bson.M = bson.M{}
+		
+		// Use ObjectID timestamp for filtering existing vehicles
+		if fromStr != "" || toStr != "" {
+			filter["_id"] = bson.M{}
+			if fromStr != "" {
+				from, err := time.Parse(time.RFC3339, fromStr)
+				if err != nil {
+					http.Error(w, "Invalid 'from' time format", http.StatusBadRequest)
+					return
+				}
+				// Convert time to ObjectID timestamp
+				fromObjectID := primitive.NewObjectIDFromTimestamp(from)
+				filter["_id"].(bson.M)["$gte"] = fromObjectID
+			}
+			if toStr != "" {
+				to, err := time.Parse(time.RFC3339, toStr)
+				if err != nil {
+					http.Error(w, "Invalid 'to' time format", http.StatusBadRequest)
+					return
+				}
+				// Convert time to ObjectID timestamp
+				toObjectID := primitive.NewObjectIDFromTimestamp(to)
+				filter["_id"].(bson.M)["$lte"] = toObjectID
+			}
+		}
+		
+		cursor, err := h.Collection.FindVehicles(ctx, filter)
 		if err != nil {
 			http.Error(w, "Failed to query vehicles", http.StatusInternalServerError)
 			return
@@ -586,6 +616,7 @@ func (h *VehicleCollectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 			Year:            vehicleInput.Year,
 			CurrentLocation: vehicleInput.CurrentLocation,
 			Status:          vehicleInput.Status,
+			CreatedAt:       time.Now(),
 		}
 		
 		// Store vehicle in database
@@ -619,11 +650,36 @@ type TripHandler struct {
 func (h *TripHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		// Get all trips
+		// Get all trips with optional time filtering
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		
-		cursor, err := h.Collection.FindTrips(ctx, bson.M{})
+		// Parse time range parameters
+		fromStr := r.URL.Query().Get("from")
+		toStr := r.URL.Query().Get("to")
+		var filter bson.M = bson.M{}
+		
+		if fromStr != "" || toStr != "" {
+			filter["start_time"] = bson.M{}
+			if fromStr != "" {
+				from, err := time.Parse(time.RFC3339, fromStr)
+				if err != nil {
+					http.Error(w, "Invalid 'from' time format", http.StatusBadRequest)
+					return
+				}
+				filter["start_time"].(bson.M)["$gte"] = from
+			}
+			if toStr != "" {
+				to, err := time.Parse(time.RFC3339, toStr)
+				if err != nil {
+					http.Error(w, "Invalid 'to' time format", http.StatusBadRequest)
+					return
+				}
+				filter["start_time"].(bson.M)["$lte"] = to
+			}
+		}
+		
+		cursor, err := h.Collection.FindTrips(ctx, filter)
 		if err != nil {
 			http.Error(w, "Failed to query trips", http.StatusInternalServerError)
 			return
@@ -697,11 +753,36 @@ type MaintenanceHandler struct {
 func (h *MaintenanceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		// Get all maintenance records
+		// Get all maintenance records with optional time filtering
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		
-		cursor, err := h.Collection.FindMaintenance(ctx, bson.M{})
+		// Parse time range parameters
+		fromStr := r.URL.Query().Get("from")
+		toStr := r.URL.Query().Get("to")
+		var filter bson.M = bson.M{}
+		
+		if fromStr != "" || toStr != "" {
+			filter["service_date"] = bson.M{}
+			if fromStr != "" {
+				from, err := time.Parse(time.RFC3339, fromStr)
+				if err != nil {
+					http.Error(w, "Invalid 'from' time format", http.StatusBadRequest)
+					return
+				}
+				filter["service_date"].(bson.M)["$gte"] = from
+			}
+			if toStr != "" {
+				to, err := time.Parse(time.RFC3339, toStr)
+				if err != nil {
+					http.Error(w, "Invalid 'to' time format", http.StatusBadRequest)
+					return
+				}
+				filter["service_date"].(bson.M)["$lte"] = to
+			}
+		}
+		
+		cursor, err := h.Collection.FindMaintenance(ctx, filter)
 		if err != nil {
 			http.Error(w, "Failed to query maintenance", http.StatusInternalServerError)
 			return
@@ -775,11 +856,36 @@ type CostHandler struct {
 func (h *CostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		// Get all cost records
+		// Get all cost records with optional time filtering
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		
-		cursor, err := h.Collection.FindCosts(ctx, bson.M{})
+		// Parse time range parameters
+		fromStr := r.URL.Query().Get("from")
+		toStr := r.URL.Query().Get("to")
+		var filter bson.M = bson.M{}
+		
+		if fromStr != "" || toStr != "" {
+			filter["date"] = bson.M{}
+			if fromStr != "" {
+				from, err := time.Parse(time.RFC3339, fromStr)
+				if err != nil {
+					http.Error(w, "Invalid 'from' time format", http.StatusBadRequest)
+					return
+				}
+				filter["date"].(bson.M)["$gte"] = from
+			}
+			if toStr != "" {
+				to, err := time.Parse(time.RFC3339, toStr)
+				if err != nil {
+					http.Error(w, "Invalid 'to' time format", http.StatusBadRequest)
+					return
+				}
+				filter["date"].(bson.M)["$lte"] = to
+			}
+		}
+		
+		cursor, err := h.Collection.FindCosts(ctx, filter)
 		if err != nil {
 			http.Error(w, "Failed to query costs", http.StatusInternalServerError)
 			return

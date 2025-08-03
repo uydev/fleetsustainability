@@ -78,7 +78,10 @@ const Dashboard: React.FC = () => {
     loadDashboardData();
   }, [loadDashboardData]);
 
+  const [currentTimeRange, setCurrentTimeRange] = useState<{ from?: string; to?: string }>({});
+
   const handleTimeRangeChange = useCallback(async (timeRange: { from?: string; to?: string }) => {
+    setCurrentTimeRange(timeRange);
     setLoading(true);
     try {
       const [telemetryData, metricsData] = await Promise.all([
@@ -160,23 +163,23 @@ const Dashboard: React.FC = () => {
       </TabPanel>
 
       <TabPanel value={tabValue} index={1}>
-        <FleetManagement />
+        <FleetManagement timeRange={currentTimeRange} />
       </TabPanel>
 
       <TabPanel value={tabValue} index={2}>
-        <TelemetryManagement />
+        <TelemetryManagement timeRange={currentTimeRange} />
       </TabPanel>
 
       <TabPanel value={tabValue} index={3}>
-        <TripManagement />
+        <TripManagement timeRange={currentTimeRange} />
       </TabPanel>
 
       <TabPanel value={tabValue} index={4}>
-        <MaintenanceManagement />
+        <MaintenanceManagement timeRange={currentTimeRange} />
       </TabPanel>
 
       <TabPanel value={tabValue} index={5}>
-        <CostManagement />
+        <CostManagement timeRange={currentTimeRange} />
       </TabPanel>
     </Container>
   );
