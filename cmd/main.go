@@ -142,7 +142,7 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         }
         ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
         defer cancel()
-        opts := options.Find().SetSort(bson.D{{"timestamp", -1}}).SetLimit(100)
+        opts := options.Find().SetSort(bson.D{{Key: "timestamp", Value: -1}}).SetLimit(100)
         cursor, err := h.Collection.Find(ctx, filter, opts)
         if err != nil {
             http.Error(w, "Failed to query telemetry", http.StatusInternalServerError)
