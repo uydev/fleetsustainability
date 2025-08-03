@@ -38,7 +38,17 @@ const FleetMap: React.FC<FleetMapProps> = ({ telemetry }) => {
 
   // Determine vehicle type based on available data
   const getVehicleType = (vehicle: Telemetry): 'ICE' | 'EV' => {
-    return vehicle.battery_level !== undefined ? 'EV' : 'ICE';
+    // First check if type is explicitly set
+    if (vehicle.type === 'EV' || vehicle.type === 'ICE') {
+      return vehicle.type;
+    }
+    // Fallback to battery level detection
+    return vehicle.battery_level !== undefined && vehicle.battery_level !== null ? 'EV' : 'ICE';
+  };
+
+  // Get vehicle status with fallback
+  const getVehicleStatus = (vehicle: Telemetry): 'active' | 'inactive' => {
+    return vehicle.status || 'active';
   };
 
   if (!telemetry || telemetry.length === 0) {
@@ -53,6 +63,38 @@ const FleetMap: React.FC<FleetMapProps> = ({ telemetry }) => {
       >
         <Typography variant="body1" color="text.secondary">
           No vehicle data available
+        </Typography>
+      </Box>
+    );
+  }
+
+  // Filter out vehicles with invalid location data
+  const validTelemetry = telemetry.filter(vehicle => 
+    vehicle.location && 
+    typeof vehicle.location.lat === 'number' && 
+    typeof vehicle.location.lon === 'number'
+  );
+
+  // Debug logging
+  console.log('FleetMap Debug:', {
+    totalTelemetry: telemetry.length,
+    validTelemetry: validTelemetry.length,
+    invalidCount: telemetry.length - validTelemetry.length,
+    sampleVehicle: validTelemetry[0] || null
+  });
+
+  if (validTelemetry.length === 0) {
+    return (
+      <Box
+        display="flex"
+        justifyContent="center"
+        alignItems="center"
+        height="100%"
+        bgcolor="#f5f5f5"
+        borderRadius={1}
+      >
+        <Typography variant="body1" color="text.secondary">
+          No vehicles with valid location data
         </Typography>
       </Box>
     );
@@ -88,24 +130,31 @@ const FleetMap: React.FC<FleetMapProps> = ({ telemetry }) => {
         />
 
         {/* Vehicle Markers */}
-        {telemetry.map((vehicle, index) => {
+        {validTelemetry.map((vehicle, index) => {
+          // Validate required data
+          if (!vehicle.location || typeof vehicle.location.lat !== 'number' || typeof vehicle.location.lon !== 'number') {
+            console.warn(`Vehicle ${vehicle.vehicle_id} has invalid location data:`, vehicle.location);
+            return null;
+          }
+
           // Convert lat/lon to relative position on map
           const latDiff = vehicle.location.lat - centerLat;
           const lonDiff = vehicle.location.lon - centerLon;
           
-          // Scale to fit map (better approximation for NYC area)
-          const x = 50 + (lonDiff * 200); // Scale longitude
-          const y = 50 - (latDiff * 200); // Scale latitude (inverted for map)
+          // Scale to fit map with better bounds checking
+          const x = 50 + (lonDiff * 100); // Reduced scale factor for better visibility
+          const y = 50 - (latDiff * 100); // Reduced scale factor for better visibility
           
           const vehicleType = getVehicleType(vehicle);
+          const vehicleStatus = getVehicleStatus(vehicle);
           
           return (
             <Box
               key={`${vehicle.vehicle_id}-${index}`}
               sx={{
                 position: 'absolute',
-                left: `${Math.max(5, Math.min(95, x))}%`,
-                top: `${Math.max(5, Math.min(95, y))}%`,
+                left: `${Math.max(10, Math.min(90, x))}%`, // Increased bounds for better visibility
+                top: `${Math.max(10, Math.min(90, y))}%`, // Increased bounds for better visibility
                 transform: 'translate(-50%, -50%)',
                 display: 'flex',
                 flexDirection: 'column',
@@ -119,7 +168,7 @@ const FleetMap: React.FC<FleetMapProps> = ({ telemetry }) => {
               <Box
                 sx={{
                   color: getVehicleColor(vehicleType),
-                  filter: vehicle.status === 'inactive' ? 'grayscale(100%)' : 'none',
+                  filter: vehicleStatus === 'inactive' ? 'grayscale(100%)' : 'none',
                 }}
               >
                 {getVehicleIcon(vehicleType)}
@@ -130,7 +179,7 @@ const FleetMap: React.FC<FleetMapProps> = ({ telemetry }) => {
                 width={8}
                 height={8}
                 borderRadius="50%"
-                bgcolor={getVehicleStatusColor(vehicle.status)}
+                bgcolor={getVehicleStatusColor(vehicleStatus)}
                 border="1px solid white"
                 position="absolute"
                 top={-4}
@@ -161,9 +210,13 @@ const FleetMap: React.FC<FleetMapProps> = ({ telemetry }) => {
               >
                 {vehicle.vehicle_id}
                 <br />
-                Speed: {vehicle.speed.toFixed(0)} km/h
+                Speed: {vehicle.speed?.toFixed(0) || 'N/A'} km/h
                 <br />
-                Emissions: {vehicle.emissions.toFixed(1)} kg
+                Emissions: {vehicle.emissions?.toFixed(1) || 'N/A'} kg
+                <br />
+                Type: {vehicleType}
+                <br />
+                Status: {vehicleStatus}
               </Box>
             </Box>
           );
@@ -203,9 +256,9 @@ const FleetMap: React.FC<FleetMapProps> = ({ telemetry }) => {
       {/* Fleet Summary */}
       <Box mt={1}>
         <Typography variant="body2" color="text.secondary">
-          Fleet Overview: {telemetry.length} vehicles
-          ({telemetry.filter(v => getVehicleType(v) === 'EV').length} EV, 
-          {telemetry.filter(v => getVehicleType(v) === 'ICE').length} ICE)
+          Fleet Overview: {validTelemetry.length} vehicles
+          ({validTelemetry.filter(v => getVehicleType(v) === 'EV').length} EV, 
+          {validTelemetry.filter(v => getVehicleType(v) === 'ICE').length} ICE)
         </Typography>
       </Box>
     </Box>

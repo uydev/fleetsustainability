@@ -41,9 +41,15 @@ kill_port() {
     local port=$1
     local pid=$(lsof -ti:$port)
     if [ ! -z "$pid" ]; then
-        print_warning "Killing process on port $port (PID: $pid)"
-        kill -9 $pid 2>/dev/null
-        sleep 2
+        # Check if it's a Node.js process before killing
+        local process_name=$(ps -p $pid -o comm= 2>/dev/null)
+        if [[ "$process_name" == *"node"* ]] || [[ "$process_name" == *"npm"* ]]; then
+            print_warning "Killing Node.js process on port $port (PID: $pid)"
+            kill -9 $pid 2>/dev/null
+            sleep 2
+        else
+            print_warning "Port $port is in use by $process_name (PID: $pid) - not killing non-Node.js process"
+        fi
     fi
 }
 
@@ -57,17 +63,17 @@ free_port() {
         print_warning "Port $port is in use by:"
         lsof -i :$port
         
-        print_status "Killing processes on port $port..."
-        
-        # Kill processes on port
-        lsof -ti:$port | xargs kill -9 2>/dev/null || {
-            print_warning "Could not kill processes without sudo, trying with sudo..."
-            sudo lsof -ti:$port | xargs kill -9 2>/dev/null || {
-                print_error "Could not kill processes on port $port"
-                print_status "Try running manually: sudo lsof -ti:$port | xargs kill -9"
-                return 1
-            }
-        }
+        # Only kill Node.js processes
+        local pids=$(lsof -ti:$port)
+        for pid in $pids; do
+            local process_name=$(ps -p $pid -o comm= 2>/dev/null)
+            if [[ "$process_name" == *"node"* ]] || [[ "$process_name" == *"npm"* ]]; then
+                print_status "Killing Node.js process on port $port (PID: $pid)"
+                kill -9 $pid 2>/dev/null
+            else
+                print_warning "Skipping non-Node.js process $process_name (PID: $pid)"
+            fi
+        done
         
         # Wait a moment for port to be freed
         sleep 2

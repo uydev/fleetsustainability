@@ -114,6 +114,8 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             FuelLevel:    fuelPtr,
             BatteryLevel: batteryPtr,
             Emissions:    teleIn.Emissions,
+            Type:         teleIn.Type,
+            Status:       teleIn.Status,
         }
         err = h.Collection.InsertTelemetry(r.Context(), tele)
         if err != nil {
