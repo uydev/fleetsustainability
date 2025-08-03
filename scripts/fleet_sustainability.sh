@@ -47,6 +47,153 @@ kill_port() {
     fi
 }
 
+# Function to free a specific port
+free_port() {
+    local port=$1
+    print_status "Checking port $port..."
+    
+    # Check if port is in use
+    if check_port $port; then
+        print_warning "Port $port is in use by:"
+        lsof -i :$port
+        
+        print_status "Killing processes on port $port..."
+        
+        # Kill processes on port
+        lsof -ti:$port | xargs kill -9 2>/dev/null || {
+            print_warning "Could not kill processes without sudo, trying with sudo..."
+            sudo lsof -ti:$port | xargs kill -9 2>/dev/null || {
+                print_error "Could not kill processes on port $port"
+                print_status "Try running manually: sudo lsof -ti:$port | xargs kill -9"
+                return 1
+            }
+        }
+        
+        # Wait a moment for port to be freed
+        sleep 2
+        
+        # Check if port is now free
+        if check_port $port; then
+            print_error "Port $port is still in use"
+            return 1
+        else
+            print_status "Port $port is now free"
+            return 0
+        fi
+    else
+        print_status "Port $port is already free"
+        return 0
+    fi
+}
+
+# Function to check Docker containers
+check_docker_containers() {
+    print_status "Checking Docker containers..."
+    echo ""
+    
+    if ! docker info >/dev/null 2>&1; then
+        print_error "Docker is not running"
+        return 1
+    fi
+    
+    print_status "Docker containers status:"
+    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep fleet-sustainability || print_warning "No fleet-sustainability containers found"
+    
+    echo ""
+    print_status "Docker compose status:"
+    cd "$(dirname "$0")/.."
+    docker-compose ps
+}
+
+# Function to check application logs
+check_application_logs() {
+    print_status "Checking application logs..."
+    echo ""
+    
+    cd "$(dirname "$0")/.."
+    
+    # Check Docker container logs
+    print_status "Backend container logs (last 20 lines):"
+    docker-compose logs --tail=20 app 2>/dev/null || print_warning "Backend container not found or not running"
+    
+    echo ""
+    print_status "MongoDB container logs (last 10 lines):"
+    docker-compose logs --tail=10 mongo 2>/dev/null || print_warning "MongoDB container not found or not running"
+    
+    echo ""
+    print_status "Mongo Express container logs (last 10 lines):"
+    docker-compose logs --tail=10 mongo-express 2>/dev/null || print_warning "Mongo Express container not found or not running"
+    
+    # Check frontend logs if they exist
+    if [ -f "frontend/frontend.log" ]; then
+        echo ""
+        print_status "Frontend logs (last 20 lines):"
+        tail -20 frontend/frontend.log
+    else
+        print_warning "Frontend log file not found"
+    fi
+}
+
+# Function to show troubleshooting menu
+troubleshooting() {
+    while true; do
+        print_header
+        echo ""
+        echo "🔧 Troubleshooting Menu"
+        echo ""
+        echo "1) Free ports (8080, 8081, 8082, 3000)"
+        echo "2) Check Docker containers"
+        echo "3) Check application logs"
+        echo "4) Back to main menu"
+        echo ""
+        read -p "Enter your choice (1-4): " choice
+        
+        case $choice in
+            1)
+                print_header
+                print_status "Freeing up ports 8080, 8081, 8082, and 3000..."
+                echo ""
+                
+                # Free port 8080 (backend internal)
+                free_port 8080
+                
+                # Free port 8081 (backend external)
+                free_port 8081
+                
+                # Free port 8082 (Mongo Express)
+                free_port 8082
+                
+                # Free port 3000 (frontend)
+                free_port 3000
+                
+                echo ""
+                print_status "🎉 Port freeing complete!"
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
+            2)
+                print_header
+                check_docker_containers
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
+            3)
+                print_header
+                check_application_logs
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
+            4)
+                break
+                ;;
+            *)
+                print_error "Invalid choice. Please enter 1-4."
+                sleep 2
+                ;;
+        esac
+    done
+}
+
 # Function to start the application
 start_fleet_sustainability() {
     print_header
@@ -263,21 +410,23 @@ show_help() {
     echo "Usage: $0 [OPTION]"
     echo ""
     echo "Options:"
-    echo "  start     Start the Fleet Sustainability application"
-    echo "  stop      Stop the Fleet Sustainability application"
-    echo "  status    Show the status of all services"
-    echo "  restart   Restart the application (stop then start)"
-    echo "  populate  Populate database with dummy data"
-    echo "  clear     Clear database data (preserves users)"
-    echo "  help      Show this help message"
+    echo "  start         Start the Fleet Sustainability application"
+    echo "  stop          Stop the Fleet Sustainability application"
+    echo "  status        Show the status of all services"
+    echo "  restart       Restart the application (stop then start)"
+    echo "  populate      Populate database with dummy data"
+    echo "  clear         Clear database data (preserves users)"
+    echo "  troubleshoot  Open troubleshooting menu"
+    echo "  help          Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0 start     # Start the application"
-    echo "  $0 stop      # Stop the application"
-    echo "  $0 status    # Check service status"
-    echo "  $0 restart   # Restart the application"
-    echo "  $0 populate  # Add dummy data to database"
-    echo "  $0 clear     # Clear database data (preserves users)"
+    echo "  $0 start         # Start the application"
+    echo "  $0 stop          # Stop the application"
+    echo "  $0 status        # Check service status"
+    echo "  $0 restart       # Restart the application"
+    echo "  $0 populate      # Add dummy data to database"
+    echo "  $0 clear         # Clear database data (preserves users)"
+    echo "  $0 troubleshoot  # Open troubleshooting menu"
     echo ""
 }
 
@@ -820,6 +969,9 @@ case "${1:-}" in
     "help"|"-h"|"--help")
         show_help
         ;;
+    "troubleshoot")
+        troubleshooting
+        ;;
     "")
         echo ""
         print_header
@@ -835,8 +987,9 @@ case "${1:-}" in
         echo "5) Populate database with dummy data"
         echo "6) Clear database data (preserves users)"
         echo "7) Show help"
+        echo "8) Troubleshoot"
         echo ""
-        read -p "Enter your choice (1-7): " choice
+        read -p "Enter your choice (1-8): " choice
         
         case $choice in
             1)
@@ -861,6 +1014,9 @@ case "${1:-}" in
                 ;;
             7)
                 show_help
+                ;;
+            8)
+                troubleshooting
                 ;;
             *)
                 print_error "Invalid choice. Please run '$0 help' for options."

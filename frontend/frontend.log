@@ -19,3 +19,4 @@ To create a production build, use npm run build.
 
 webpack compiled successfully
 No issues found.
+The build failed because the process exited too early. This probably means the system ran out of memory or someone called `kill -9` on the process.
