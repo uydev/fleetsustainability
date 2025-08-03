@@ -140,15 +140,9 @@ func TestInsertTelemetry_Integration(t *testing.T) {
 		t.Skip("MONGO_URI not set or invalid, skipping integration test")
 		return
 	}
-	client, err := mongo.NewClient(options.Client().ApplyURI(uri))
+	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(uri))
 	if err != nil {
 		t.Skipf("failed to create client: %v, skipping integration test", err)
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := client.Connect(ctx); err != nil {
-		t.Skipf("failed to connect: %v, skipping integration test", err)
 		return
 	}
 	dbName := os.Getenv("MONGO_DB")

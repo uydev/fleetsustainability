@@ -1,16 +1,15 @@
 package main
 
 import (
-    "context"
+	"context"
+	"strings"
     "encoding/json"
     "io"
     log "github.com/sirupsen/logrus"
     "net/http"
     "os"
-    "strings"
     "time"
 
-    "github.com/golang-jwt/jwt/v5"
     "github.com/ukydev/fleet-sustainability/internal/db"
     "github.com/ukydev/fleet-sustainability/internal/models"
     "go.mongodb.org/mongo-driver/bson"
@@ -954,28 +953,7 @@ func (h *CostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-var jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 var vehicleCollectionHandler *VehicleCollectionHandler
-
-// jwtAuthMiddleware is a middleware that enforces JWT authentication for protected endpoints.
-func jwtAuthMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        authHeader := r.Header.Get("Authorization")
-        if !strings.HasPrefix(authHeader, "Bearer ") {
-            http.Error(w, "Missing or invalid Authorization header", http.StatusUnauthorized)
-            return
-        }
-        tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-        token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-            return jwtSecret, nil
-        })
-        if err != nil || !token.Valid {
-            http.Error(w, "Invalid token", http.StatusUnauthorized)
-            return
-        }
-        next.ServeHTTP(w, r)
-    })
-}
 
 // main is the entry point for the Fleet Sustainability backend service.
 func main() {

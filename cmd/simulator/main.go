@@ -45,7 +45,7 @@ func randomLocation() Location {
 	}
 }
 
-func createVehicle(apiURL string, vehicleID string, vtype string) (string, error) {
+func createVehicle(apiURL string, initialVehicleID string, vtype string) (string, error) {
 	makes := map[string][]string{
 		"ICE": {"Ford", "Chevrolet", "Toyota", "Honda", "BMW"},
 		"EV":  {"Tesla", "Nissan", "Chevrolet", "Ford", "Audi"},
@@ -88,19 +88,19 @@ func createVehicle(apiURL string, vehicleID string, vtype string) (string, error
 		return "", fmt.Errorf("failed to decode response: %w", err)
 	}
 	
-	vehicleID, ok := result["id"].(string)
+	createdVehicleID, ok := result["id"].(string)
 	if !ok {
 		return "", fmt.Errorf("invalid vehicle ID in response")
 	}
 	
 	log.WithFields(log.Fields{
-		"vehicle_id": vehicleID,
+		"vehicle_id": createdVehicleID,
 		"type":       vtype,
 		"make":       make,
 		"model":      model,
 	}).Info("Created vehicle")
 	
-	return vehicleID, nil
+	return createdVehicleID, nil
 }
 
 func randomTelemetry(vehicleID, vtype string) Telemetry {
@@ -145,7 +145,6 @@ func simulateVehicle(apiURL, vehicleID, vtype string, interval time.Duration) {
 }
 
 func main() {
-	rand.Seed(time.Now().UnixNano())
 	
 	fleetSize := 10
 	if val := os.Getenv("FLEET_SIZE"); val != "" {

@@ -19,15 +19,12 @@ func ConnectMongo() (*mongo.Client, error) {
     if uri == "" {
         uri = "mongodb://root:example@mongo:27017"
     }
-    client, err := mongo.NewClient(options.Client().ApplyURI(uri))
+    client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(uri))
     if err != nil {
         return nil, fmt.Errorf("mongo.NewClient error: %w", err)
     }
     ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
     defer cancel()
-    if err := client.Connect(ctx); err != nil {
-        return nil, fmt.Errorf("mongo.Connect error: %w", err)
-    }
     // Ping to verify connection
     if err := client.Ping(ctx, nil); err != nil {
         return nil, fmt.Errorf("mongo.Ping error: %w", err)
