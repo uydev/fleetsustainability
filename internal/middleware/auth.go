@@ -11,6 +11,13 @@ import (
 	"github.com/ukydev/fleet-sustainability/internal/models"
 )
 
+// contextKey is a custom type for context keys to avoid collisions
+type contextKey string
+
+const (
+	UserContextKey contextKey = "user"
+)
+
 // AuthMiddleware provides JWT authentication middleware
 type AuthMiddleware struct {
 	authService *auth.Service
@@ -47,7 +54,7 @@ func (m *AuthMiddleware) Authenticate(next http.Handler) http.Handler {
 		}
 
 		// Add user context to request
-		ctx := context.WithValue(r.Context(), "user", claims)
+		ctx := context.WithValue(r.Context(), UserContextKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -56,7 +63,7 @@ func (m *AuthMiddleware) Authenticate(next http.Handler) http.Handler {
 func (m *AuthMiddleware) RequireRole(requiredRole models.Role) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			claims, ok := r.Context().Value("user").(*models.Claims)
+			claims, ok := r.Context().Value(UserContextKey).(*models.Claims)
 			if !ok {
 				http.Error(w, "User context not found", http.StatusUnauthorized)
 				return
@@ -76,7 +83,7 @@ func (m *AuthMiddleware) RequireRole(requiredRole models.Role) func(http.Handler
 func (m *AuthMiddleware) RequirePermission(requiredAction string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			claims, ok := r.Context().Value("user").(*models.Claims)
+			claims, ok := r.Context().Value(UserContextKey).(*models.Claims)
 			if !ok {
 				http.Error(w, "User context not found", http.StatusUnauthorized)
 				return
@@ -99,7 +106,7 @@ func (m *AuthMiddleware) RequirePermission(requiredAction string) func(http.Hand
 
 // GetUserFromContext extracts user claims from request context
 func GetUserFromContext(ctx context.Context) (*models.Claims, bool) {
-	claims, ok := ctx.Value("user").(*models.Claims)
+	claims, ok := ctx.Value(UserContextKey).(*models.Claims)
 	return claims, ok
 }
 

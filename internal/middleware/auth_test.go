@@ -273,7 +273,7 @@ func TestGetUserFromContext(t *testing.T) {
 		Role:     models.RoleAdmin,
 	}
 
-	ctx := context.WithValue(context.Background(), "user", claims)
+	ctx := context.WithValue(context.Background(), UserContextKey, claims)
 	
 	retrievedClaims, ok := GetUserFromContext(ctx)
 	assert.True(t, ok)

@@ -200,7 +200,7 @@ func TestConnectMongo_ValidURI(t *testing.T) {
 	os.Setenv("MONGO_URI", "mongodb://localhost:27017")
 	
 	// This might fail due to no MongoDB running, but we test the URI parsing
-	client, err := ConnectMongo()
+	client, _ := ConnectMongo()
 	// We don't check for success since MongoDB might not be running
 	// but we ensure the function doesn't panic
 	if client != nil {

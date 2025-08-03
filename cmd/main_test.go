@@ -94,6 +94,10 @@ func (m *mockTelemetryCollection) InsertTelemetry(ctx context.Context, telemetry
     return m.insertErr // simulate DB error if set
 }
 
+func (m *mockTelemetryCollection) DeleteAll(ctx context.Context) error {
+    return nil // simulate successful deletion
+}
+
 func TestTelemetryHandler_POST_InvalidJSON(t *testing.T) {
 	handler := &TelemetryHandler{Collection: &mockTelemetryCollection{}}
 	req := httptest.NewRequest(http.MethodPost, "/api/telemetry", bytes.NewBuffer([]byte("{bad json")))
@@ -1331,6 +1335,10 @@ func (m *mockVehicleCollection) UpdateVehicle(ctx context.Context, id string, ve
 }
 
 func (m *mockVehicleCollection) DeleteVehicle(ctx context.Context, id string) error {
+	return nil
+}
+
+func (m *mockVehicleCollection) DeleteAll(ctx context.Context) error {
 	return nil
 }
 

@@ -507,6 +507,7 @@ func vehicleHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
+
 // vehicleRouter handles both collection and individual vehicle operations.
 func vehicleRouter(w http.ResponseWriter, r *http.Request) {
 	// Check if this is an individual vehicle operation
@@ -1102,8 +1103,8 @@ func main() {
     // Protected routes (require authentication)
     // Temporarily disable rate limiting for development
     http.Handle("/api/telemetry", corsMiddleware(authMiddleware.Authenticate(telemetryHandler)))
-    http.Handle("/api/vehicles", corsMiddleware(authMiddleware.Authenticate(vehicleCollectionHandler)))
-    http.Handle("/api/vehicles/", corsMiddleware(authMiddleware.Authenticate(&VehicleHandler{Collection: vehicleCollection})))
+    http.Handle("/api/vehicles", corsMiddleware(authMiddleware.Authenticate(http.HandlerFunc(vehicleRouter))))
+    http.Handle("/api/vehicles/", corsMiddleware(authMiddleware.Authenticate(http.HandlerFunc(vehicleRouter))))
     http.Handle("/api/trips", corsMiddleware(authMiddleware.Authenticate(tripHandler)))
     http.Handle("/api/maintenance", corsMiddleware(authMiddleware.Authenticate(maintenanceHandler)))
     http.Handle("/api/costs", corsMiddleware(authMiddleware.Authenticate(costHandler)))

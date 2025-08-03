@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/ukydev/fleet-sustainability/internal/auth"
 	"github.com/ukydev/fleet-sustainability/internal/db"
+	"github.com/ukydev/fleet-sustainability/internal/middleware"
 	"github.com/ukydev/fleet-sustainability/internal/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -314,7 +315,7 @@ func TestAuthHandler_GetProfile(t *testing.T) {
 		mockUserCollection.On("FindUserByID", mock.Anything, userID.Hex()).Return(user, nil)
 
 		req := httptest.NewRequest("GET", "/api/auth/profile", nil)
-		ctx := context.WithValue(req.Context(), "user", claims)
+		ctx := context.WithValue(req.Context(), middleware.UserContextKey, claims)
 		req = req.WithContext(ctx)
 		w := httptest.NewRecorder()
 
@@ -344,7 +345,7 @@ func TestAuthHandler_GetProfile(t *testing.T) {
 		mockUserCollection.On("FindUserByID", mock.Anything, userID.Hex()).Return(nil, assert.AnError)
 
 		req := httptest.NewRequest("GET", "/api/auth/profile", nil)
-		ctx := context.WithValue(req.Context(), "user", claims)
+		ctx := context.WithValue(req.Context(), middleware.UserContextKey, claims)
 		req = req.WithContext(ctx)
 		w := httptest.NewRecorder()
 
@@ -393,7 +394,7 @@ func TestAuthHandler_UpdateProfile(t *testing.T) {
 			t.Fatalf("Failed to marshal update request: %v", err)
 		}
 		req := httptest.NewRequest("PUT", "/api/auth/profile", bytes.NewBuffer(body))
-		ctx := context.WithValue(req.Context(), "user", claims)
+		ctx := context.WithValue(req.Context(), middleware.UserContextKey, claims)
 		req = req.WithContext(ctx)
 		w := httptest.NewRecorder()
 
@@ -444,7 +445,7 @@ func TestAuthHandler_ChangePassword(t *testing.T) {
 			t.Fatalf("Failed to marshal password request: %v", err)
 		}
 		req := httptest.NewRequest("POST", "/api/auth/change-password", bytes.NewBuffer(body))
-		ctx := context.WithValue(req.Context(), "user", claims)
+		ctx := context.WithValue(req.Context(), middleware.UserContextKey, claims)
 		req = req.WithContext(ctx)
 		w := httptest.NewRecorder()
 
@@ -485,7 +486,7 @@ func TestAuthHandler_ChangePassword(t *testing.T) {
 			t.Fatalf("Failed to marshal password request: %v", err)
 		}
 		req := httptest.NewRequest("POST", "/api/auth/change-password", bytes.NewBuffer(body))
-		ctx := context.WithValue(req.Context(), "user", claims)
+		ctx := context.WithValue(req.Context(), middleware.UserContextKey, claims)
 		req = req.WithContext(ctx)
 		w := httptest.NewRecorder()
 
