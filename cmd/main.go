@@ -2,25 +2,25 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"os"
+	"os/signal"
 	"strings"
-    "encoding/json"
-    "io"
-    log "github.com/sirupsen/logrus"
-    "net/http"
-    "os"
-    "os/signal"
-    "syscall"
-    "time"
+	"syscall"
+	"time"
 
-    "github.com/ukydev/fleet-sustainability/internal/db"
-    "github.com/ukydev/fleet-sustainability/internal/models"
-    "github.com/ukydev/fleet-sustainability/internal/auth"
-    "github.com/ukydev/fleet-sustainability/internal/handlers"
-    "github.com/ukydev/fleet-sustainability/internal/middleware"
-    "go.mongodb.org/mongo-driver/bson"
-    "go.mongodb.org/mongo-driver/bson/primitive"
-    "go.mongodb.org/mongo-driver/mongo/options"
-    "github.com/joho/godotenv"
+	log "github.com/sirupsen/logrus"
+	"github.com/joho/godotenv"
+	"github.com/ukydev/fleet-sustainability/internal/auth"
+	"github.com/ukydev/fleet-sustainability/internal/db"
+	"github.com/ukydev/fleet-sustainability/internal/handlers"
+	"github.com/ukydev/fleet-sustainability/internal/middleware"
+	"github.com/ukydev/fleet-sustainability/internal/models"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // corsMiddleware adds CORS headers to allow frontend requests
@@ -94,8 +94,11 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             return
         }
         // Optionally, add more checks for FuelLevel, BatteryLevel, Location, etc.
-        vehicleObjID := primitive.NewObjectID()
-        timestamp, _ := time.Parse(time.RFC3339, teleIn.Timestamp)
+        timestamp, err := time.Parse(time.RFC3339, teleIn.Timestamp)
+        if err != nil {
+            http.Error(w, "Invalid timestamp format", http.StatusBadRequest)
+            return
+        }
         var fuelPtr, batteryPtr *float64
         if teleIn.FuelLevel != 0 {
             fuelPtr = &teleIn.FuelLevel
@@ -104,7 +107,7 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             batteryPtr = &teleIn.BatteryLevel
         }
         tele := models.Telemetry{
-            VehicleID:    vehicleObjID, // In a real app, map string to ObjectID
+            VehicleID:    primitive.NewObjectID(), // In a real app, map string to ObjectID
             Timestamp:    timestamp,
             Location:     teleIn.Location,
             Speed:        teleIn.Speed,

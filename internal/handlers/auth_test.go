@@ -76,14 +76,20 @@ func (m *MockUserCollection) UpdateLastLogin(ctx context.Context, id string) err
 }
 
 func TestAuthHandler_Login(t *testing.T) {
-	authService, _ := auth.NewService()
+	authService, err := auth.NewService()
+	if err != nil {
+		t.Fatalf("Failed to create auth service: %v", err)
+	}
 
 	t.Run("successful login", func(t *testing.T) {
 		mockUserCollection := new(MockUserCollection)
 		handler := NewAuthHandler(authService, db.UserCollection(mockUserCollection))
 
 		// Create a real password hash
-		passwordHash, _ := authService.HashPassword("password123")
+		passwordHash, err := authService.HashPassword("password123")
+		if err != nil {
+			t.Fatalf("Failed to hash password: %v", err)
+		}
 		user := &models.User{
 			ID:           primitive.NewObjectID(),
 			Username:     "testuser",
@@ -101,7 +107,10 @@ func TestAuthHandler_Login(t *testing.T) {
 			Password: "password123",
 		}
 
-		body, _ := json.Marshal(loginReq)
+		body, err := json.Marshal(loginReq)
+		if err != nil {
+			t.Fatalf("Failed to marshal login request: %v", err)
+		}
 		req := httptest.NewRequest("POST", "/api/auth/login", bytes.NewBuffer(body))
 		w := httptest.NewRecorder()
 
@@ -110,7 +119,10 @@ func TestAuthHandler_Login(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		var response models.LoginResponse
-		json.Unmarshal(w.Body.Bytes(), &response)
+		err = json.Unmarshal(w.Body.Bytes(), &response)
+		if err != nil {
+			t.Fatalf("Failed to unmarshal response: %v", err)
+		}
 		assert.NotEmpty(t, response.Token)
 		assert.NotEmpty(t, response.RefreshToken)
 		assert.Equal(t, user.Username, response.User.Username)
@@ -129,7 +141,10 @@ func TestAuthHandler_Login(t *testing.T) {
 			Password: "wrongpassword",
 		}
 
-		body, _ := json.Marshal(loginReq)
+		body, err := json.Marshal(loginReq)
+		if err != nil {
+			t.Fatalf("Failed to marshal login request: %v", err)
+		}
 		req := httptest.NewRequest("POST", "/api/auth/login", bytes.NewBuffer(body))
 		w := httptest.NewRecorder()
 
@@ -144,7 +159,10 @@ func TestAuthHandler_Login(t *testing.T) {
 		handler := NewAuthHandler(authService, db.UserCollection(mockUserCollection))
 
 		// Create a real password hash
-		passwordHash, _ := authService.HashPassword("password123")
+		passwordHash, err := authService.HashPassword("password123")
+		if err != nil {
+			t.Fatalf("Failed to hash password: %v", err)
+		}
 		user := &models.User{
 			ID:           primitive.NewObjectID(),
 			Username:     "testuser",
@@ -159,7 +177,10 @@ func TestAuthHandler_Login(t *testing.T) {
 			Password: "password123",
 		}
 
-		body, _ := json.Marshal(loginReq)
+		body, err := json.Marshal(loginReq)
+		if err != nil {
+			t.Fatalf("Failed to marshal login request: %v", err)
+		}
 		req := httptest.NewRequest("POST", "/api/auth/login", bytes.NewBuffer(body))
 		w := httptest.NewRecorder()
 
@@ -171,7 +192,10 @@ func TestAuthHandler_Login(t *testing.T) {
 }
 
 func TestAuthHandler_Register(t *testing.T) {
-	authService, _ := auth.NewService()
+	authService, err := auth.NewService()
+	if err != nil {
+		t.Fatalf("Failed to create auth service: %v", err)
+	}
 	mockUserCollection := new(MockUserCollection)
 	handler := NewAuthHandler(authService, db.UserCollection(mockUserCollection))
 
@@ -190,7 +214,10 @@ func TestAuthHandler_Register(t *testing.T) {
 		mockUserCollection.On("FindUserByEmail", mock.Anything, "newuser@example.com").Return(nil, assert.AnError)
 		mockUserCollection.On("InsertUser", mock.Anything, mock.AnythingOfType("models.User")).Return(nil)
 
-		body, _ := json.Marshal(registerReq)
+		body, err := json.Marshal(registerReq)
+		if err != nil {
+			t.Fatalf("Failed to marshal register request: %v", err)
+		}
 		req := httptest.NewRequest("POST", "/api/auth/register", bytes.NewBuffer(body))
 		w := httptest.NewRecorder()
 
@@ -199,7 +226,10 @@ func TestAuthHandler_Register(t *testing.T) {
 		assert.Equal(t, http.StatusCreated, w.Code)
 
 		var response models.LoginResponse
-		json.Unmarshal(w.Body.Bytes(), &response)
+		err = json.Unmarshal(w.Body.Bytes(), &response)
+		if err != nil {
+			t.Fatalf("Failed to unmarshal response: %v", err)
+		}
 		assert.NotEmpty(t, response.Token)
 		assert.NotEmpty(t, response.RefreshToken)
 		assert.Equal(t, registerReq.Username, response.User.Username)
@@ -220,7 +250,10 @@ func TestAuthHandler_Register(t *testing.T) {
 
 		mockUserCollection.On("FindUserByUsername", mock.Anything, "existinguser").Return(existingUser, nil)
 
-		body, _ := json.Marshal(registerReq)
+		body, err := json.Marshal(registerReq)
+		if err != nil {
+			t.Fatalf("Failed to marshal register request: %v", err)
+		}
 		req := httptest.NewRequest("POST", "/api/auth/register", bytes.NewBuffer(body))
 		w := httptest.NewRecorder()
 
@@ -240,7 +273,10 @@ func TestAuthHandler_Register(t *testing.T) {
 			Role:      "invalid_role",
 		}
 
-		body, _ := json.Marshal(registerReq)
+		body, err := json.Marshal(registerReq)
+		if err != nil {
+			t.Fatalf("Failed to marshal register request: %v", err)
+		}
 		req := httptest.NewRequest("POST", "/api/auth/register", bytes.NewBuffer(body))
 		w := httptest.NewRecorder()
 
@@ -251,7 +287,10 @@ func TestAuthHandler_Register(t *testing.T) {
 }
 
 func TestAuthHandler_GetProfile(t *testing.T) {
-	authService, _ := auth.NewService()
+	authService, err := auth.NewService()
+	if err != nil {
+		t.Fatalf("Failed to create auth service: %v", err)
+	}
 	mockUserCollection := new(MockUserCollection)
 	handler := NewAuthHandler(authService, db.UserCollection(mockUserCollection))
 
@@ -284,7 +323,10 @@ func TestAuthHandler_GetProfile(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		var response models.User
-		json.Unmarshal(w.Body.Bytes(), &response)
+		err = json.Unmarshal(w.Body.Bytes(), &response)
+		if err != nil {
+			t.Fatalf("Failed to unmarshal response: %v", err)
+		}
 		assert.Equal(t, user.Username, response.Username)
 		assert.Equal(t, user.Email, response.Email)
 
@@ -314,7 +356,10 @@ func TestAuthHandler_GetProfile(t *testing.T) {
 }
 
 func TestAuthHandler_UpdateProfile(t *testing.T) {
-	authService, _ := auth.NewService()
+	authService, err := auth.NewService()
+	if err != nil {
+		t.Fatalf("Failed to create auth service: %v", err)
+	}
 	mockUserCollection := new(MockUserCollection)
 	handler := NewAuthHandler(authService, db.UserCollection(mockUserCollection))
 
@@ -343,7 +388,10 @@ func TestAuthHandler_UpdateProfile(t *testing.T) {
 		mockUserCollection.On("FindUserByID", mock.Anything, userID.Hex()).Return(user, nil)
 		mockUserCollection.On("UpdateUser", mock.Anything, userID.Hex(), mock.AnythingOfType("models.User")).Return(nil)
 
-		body, _ := json.Marshal(updateReq)
+		body, err := json.Marshal(updateReq)
+		if err != nil {
+			t.Fatalf("Failed to marshal update request: %v", err)
+		}
 		req := httptest.NewRequest("PUT", "/api/auth/profile", bytes.NewBuffer(body))
 		ctx := context.WithValue(req.Context(), "user", claims)
 		req = req.WithContext(ctx)
@@ -357,14 +405,20 @@ func TestAuthHandler_UpdateProfile(t *testing.T) {
 }
 
 func TestAuthHandler_ChangePassword(t *testing.T) {
-	authService, _ := auth.NewService()
+	authService, err := auth.NewService()
+	if err != nil {
+		t.Fatalf("Failed to create auth service: %v", err)
+	}
 	mockUserCollection := new(MockUserCollection)
 	handler := NewAuthHandler(authService, db.UserCollection(mockUserCollection))
 
 	t.Run("successful password change", func(t *testing.T) {
 		userID := primitive.NewObjectID()
 		// Create a real password hash
-		passwordHash, _ := authService.HashPassword("oldpassword")
+		passwordHash, err := authService.HashPassword("oldpassword")
+		if err != nil {
+			t.Fatalf("Failed to hash password: %v", err)
+		}
 		user := &models.User{
 			ID:           userID,
 			Username:     "testuser",
@@ -385,7 +439,10 @@ func TestAuthHandler_ChangePassword(t *testing.T) {
 		mockUserCollection.On("FindUserByID", mock.Anything, userID.Hex()).Return(user, nil)
 		mockUserCollection.On("UpdateUser", mock.Anything, userID.Hex(), mock.AnythingOfType("models.User")).Return(nil)
 
-		body, _ := json.Marshal(passwordReq)
+		body, err := json.Marshal(passwordReq)
+		if err != nil {
+			t.Fatalf("Failed to marshal password request: %v", err)
+		}
 		req := httptest.NewRequest("POST", "/api/auth/change-password", bytes.NewBuffer(body))
 		ctx := context.WithValue(req.Context(), "user", claims)
 		req = req.WithContext(ctx)
@@ -400,7 +457,10 @@ func TestAuthHandler_ChangePassword(t *testing.T) {
 	t.Run("incorrect current password", func(t *testing.T) {
 		userID := primitive.NewObjectID()
 		// Create a real password hash
-		passwordHash, _ := authService.HashPassword("oldpassword")
+		passwordHash, err := authService.HashPassword("oldpassword")
+		if err != nil {
+			t.Fatalf("Failed to hash password: %v", err)
+		}
 		user := &models.User{
 			ID:           userID,
 			Username:     "testuser",
@@ -420,7 +480,10 @@ func TestAuthHandler_ChangePassword(t *testing.T) {
 
 		mockUserCollection.On("FindUserByID", mock.Anything, userID.Hex()).Return(user, nil)
 
-		body, _ := json.Marshal(passwordReq)
+		body, err := json.Marshal(passwordReq)
+		if err != nil {
+			t.Fatalf("Failed to marshal password request: %v", err)
+		}
 		req := httptest.NewRequest("POST", "/api/auth/change-password", bytes.NewBuffer(body))
 		ctx := context.WithValue(req.Context(), "user", claims)
 		req = req.WithContext(ctx)
