@@ -12,11 +12,13 @@ import (
 	"time"
 )
 
+// Location represents a geographical location with latitude and longitude coordinates.
 type Location struct {
 	Lat float64 `json:"lat"`
 	Lon float64 `json:"lon"`
 }
 
+// Vehicle represents a fleet vehicle with its specifications and current status.
 type Vehicle struct {
 	Type            string   `json:"type"`
 	Make            string   `json:"make"`
@@ -26,6 +28,7 @@ type Vehicle struct {
 	Status          string   `json:"status"`
 }
 
+// Telemetry represents real-time vehicle telemetry data including location, speed, and status.
 type Telemetry struct {
 	VehicleID    string    `json:"vehicle_id"`
 	Timestamp    time.Time `json:"timestamp"`
