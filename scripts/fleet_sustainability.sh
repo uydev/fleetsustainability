@@ -247,13 +247,13 @@ start_fleet_sustainability() {
         exit 1
     fi
 
-    # Create test users
-    print_status "5. Creating test users..."
-    ./scripts/setup_auth.sh > /dev/null 2>&1
+    # Ensure admin user exists
+    print_status "5. Ensuring admin user exists..."
+    ensure_admin_user
     if [ $? -eq 0 ]; then
-        print_status "   Test users created successfully"
+        print_status "   Admin user is ready"
     else
-        print_warning "   Failed to create test users (they may already exist)"
+        print_warning "   Admin user creation had issues, but continuing..."
     fi
 
     # Start frontend (local process)
@@ -288,6 +288,9 @@ start_fleet_sustainability() {
     # Test the application
     print_status "7. Testing application..."
     sleep 3
+    
+    # Ensure admin user exists for testing
+    ensure_admin_user
     
     # Test login API (backend is now on port 8081 via Docker)
     LOGIN_RESPONSE=$(curl -s -X POST http://localhost:8081/api/auth/login \
@@ -466,15 +469,9 @@ clear_database() {
         sleep 1
     done
 
-    # Create admin user if it doesn't exist
-    print_status "4. Creating admin user..."
-    REGISTER_RESPONSE=$(curl -s -X POST http://localhost:8081/api/auth/register \
-        -H "Content-Type: application/json" \
-        -d '{"username": "admin", "password": "admin123", "email": "admin@fleet.com", "first_name": "Admin", "last_name": "User", "role": "admin"}')
-    
-    if ! echo "$REGISTER_RESPONSE" | grep -q "token"; then
-        print_warning "Admin user may already exist, trying to login..."
-    fi
+    # Ensure admin user exists
+    print_status "4. Ensuring admin user exists..."
+    ensure_admin_user
 
     # Get admin token for API calls
     print_status "5. Getting admin authentication token..."
@@ -578,8 +575,17 @@ populate_database() {
         exit 1
     fi
 
+    # Ensure admin user exists first
+    print_status "1. Ensuring admin user exists..."
+    ensure_admin_user
+    if [ $? -ne 0 ]; then
+        print_error "Failed to ensure admin user exists. Cannot proceed with population."
+        print_status "   Please start the application first with: ./scripts/fleet_sustainability.sh start"
+        exit 1
+    fi
+
     # Get admin token for API calls
-    print_status "1. Getting admin authentication token..."
+    print_status "2. Getting admin authentication token..."
     LOGIN_RESPONSE=$(curl -s -X POST http://localhost:8081/api/auth/login \
         -H "Content-Type: application/json" \
         -d '{"username": "admin", "password": "admin123"}')
@@ -605,17 +611,17 @@ populate_database() {
     
     print_status "   Authentication successful"
 
-    # Create dummy vehicles
-    print_status "2. Creating dummy vehicles..."
+    # Create dummy vehicles - balanced mix of EV and ICE
+    print_status "3. Creating dummy vehicles..."
     VEHICLES=(
-        '{"type": "ICE", "make": "Ford", "model": "F-150", "year": 2022, "status": "active"}'
         '{"type": "EV", "make": "Tesla", "model": "Model 3", "year": 2023, "status": "active"}'
-        '{"type": "ICE", "make": "Chevrolet", "model": "Silverado", "year": 2021, "status": "active"}'
+        '{"type": "EV", "make": "Tesla", "model": "Model Y", "year": 2023, "status": "active"}'
         '{"type": "EV", "make": "Nissan", "model": "Leaf", "year": 2023, "status": "active"}'
-        '{"type": "ICE", "make": "Toyota", "model": "Tacoma", "year": 2022, "status": "active"}'
         '{"type": "EV", "make": "Ford", "model": "E-Transit", "year": 2023, "status": "active"}'
-        '{"type": "ICE", "make": "Ram", "model": "1500", "year": 2021, "status": "active"}'
         '{"type": "EV", "make": "Rivian", "model": "R1T", "year": 2023, "status": "active"}'
+        '{"type": "ICE", "make": "Ford", "model": "F-150", "year": 2022, "status": "active"}'
+        '{"type": "ICE", "make": "Chevrolet", "model": "Silverado", "year": 2021, "status": "active"}'
+        '{"type": "ICE", "make": "Toyota", "model": "Tacoma", "year": 2022, "status": "active"}'
     )
     
     for vehicle in "${VEHICLES[@]}"; do
@@ -630,7 +636,7 @@ populate_database() {
     print_status "   Created 8 vehicles"
 
     # Create dummy telemetry data
-    print_status "3. Creating dummy telemetry data..."
+    print_status "4. Creating dummy telemetry data..."
     
     # First, get the vehicle IDs that were created
     VEHICLES_RESPONSE=$(curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/vehicles)
@@ -639,16 +645,36 @@ populate_database() {
     # Extract vehicle IDs (this is a simplified approach - in production you'd parse JSON properly)
     VEHICLE_IDS=("vehicle1" "vehicle2" "vehicle3" "vehicle4" "vehicle5" "vehicle6" "vehicle7" "vehicle8")
     
+    # Define valid city coordinates
+    CITIES=(
+        "51.5074:-0.1278"    # London, UK
+        "40.7128:-74.0060"   # New York, USA
+        "40.4168:-3.7038"    # Madrid, Spain
+        "35.1856:33.3823"    # Nicosia, Cyprus
+        "4.7110:-74.0721"    # Bogotá, Colombia
+        "48.8566:2.3522"     # Paris, France
+        "41.0082:28.9784"    # Istanbul, Turkey
+        "51.4816:-3.1791"    # Cardiff, UK
+    )
+    
     for i in {1..100}; do
         # Generate random data
         VEHICLE_INDEX=$((RANDOM % 8))
         VEHICLE_ID="${VEHICLE_IDS[$VEHICLE_INDEX]}"
         SPEED=$((RANDOM % 80 + 20))
-        FUEL_LEVEL=$((RANDOM % 100 + 1))
-        BATTERY_LEVEL=$((RANDOM % 100 + 1))
-        EMISSIONS=$((RANDOM % 50 + 5))
-        LAT=$((RANDOM % 1000 + 40000)) # Roughly 40-50 latitude
-        LON=$((RANDOM % 1000 - 75000)) # Roughly -75 longitude
+        
+        # Select a random city
+        CITY_INDEX=$((RANDOM % 8))
+        CITY_COORDS="${CITIES[$CITY_INDEX]}"
+        BASE_LAT=$(echo "$CITY_COORDS" | cut -d':' -f1)
+        BASE_LON=$(echo "$CITY_COORDS" | cut -d':' -f2)
+        
+        # Add small random offset to coordinates (within ~5km of city center)
+        LAT_OFFSET=$(echo "scale=4; ($RANDOM % 100 - 50) / 1000" | bc -l 2>/dev/null || echo "0.0250")
+        LON_OFFSET=$(echo "scale=4; ($RANDOM % 100 - 50) / 1000" | bc -l 2>/dev/null || echo "0.0250")
+        
+        LAT=$(echo "scale=4; $BASE_LAT + $LAT_OFFSET" | bc -l 2>/dev/null || echo "$BASE_LAT")
+        LON=$(echo "scale=4; $BASE_LON + $LON_OFFSET" | bc -l 2>/dev/null || echo "$BASE_LON")
         
         # Generate realistic timestamps (last 7 days)
         DAYS_AGO=$((RANDOM % 7))
@@ -656,11 +682,22 @@ populate_database() {
         MINUTES_AGO=$((RANDOM % 60))
         TIMESTAMP=$(date -u -v-${DAYS_AGO}d -v-${HOURS_AGO}H -v-${MINUTES_AGO}M +%Y-%m-%dT%H:%M:%SZ)
         
-        # Determine vehicle type based on vehicle ID
-        if [[ "$VEHICLE_ID" == *"vehicle"* ]]; then
-            VEHICLE_TYPE="ICE"
-        else
+        # Determine vehicle type - mix of EV and ICE (60% EV, 40% ICE for sustainability focus)
+        VEHICLE_TYPE_RAND=$((RANDOM % 100))
+        if [ $VEHICLE_TYPE_RAND -lt 60 ]; then
             VEHICLE_TYPE="EV"
+            # EV vehicles have no fuel, only battery
+            FUEL_LEVEL=0
+            BATTERY_LEVEL=$((RANDOM % 100 + 1))
+            # EVs have lower emissions
+            EMISSIONS=$((RANDOM % 20 + 5))
+        else
+            VEHICLE_TYPE="ICE"
+            # ICE vehicles have fuel but no battery
+            FUEL_LEVEL=$((RANDOM % 100 + 1))
+            BATTERY_LEVEL=0
+            # ICE vehicles have higher emissions
+            EMISSIONS=$((RANDOM % 50 + 20))
         fi
         
         TELEMETRY_DATA="{
@@ -687,8 +724,20 @@ populate_database() {
     print_status "   Created 100 telemetry records"
 
     # Create dummy trips
-    print_status "4. Creating dummy trips..."
+    print_status "5. Creating dummy trips..."
     VEHICLE_IDS=("vehicle1" "vehicle2" "vehicle3" "vehicle4" "vehicle5" "vehicle6" "vehicle7" "vehicle8")
+    
+    # Define valid city coordinates (same as telemetry section)
+    CITIES=(
+        "51.5074:-0.1278"    # London, UK
+        "40.7128:-74.0060"   # New York, USA
+        "40.4168:-3.7038"    # Madrid, Spain
+        "35.1856:33.3823"    # Nicosia, Cyprus
+        "4.7110:-74.0721"    # Bogotá, Colombia
+        "48.8566:2.3522"     # Paris, France
+        "41.0082:28.9784"    # Istanbul, Turkey
+        "51.4816:-3.1791"    # Cardiff, UK
+    )
     
     # Create multiple trips for each vehicle
     for vehicle in "${VEHICLE_IDS[@]}"; do
@@ -700,11 +749,23 @@ populate_database() {
             START_TIME=$(date -u -v-${day}d -v+${START_HOUR}H +%Y-%m-%dT%H:%M:%SZ)
             END_TIME=$(date -u -v-${day}d -v+${END_HOUR}H +%Y-%m-%dT%H:%M:%SZ)
             
-            # Generate realistic locations (NYC area)
-            START_LAT=$((40000 + RANDOM % 1000))
-            START_LON=$((-75000 + RANDOM % 1000))
-            END_LAT=$((40000 + RANDOM % 1000))
-            END_LON=$((-75000 + RANDOM % 1000))
+            # Generate realistic locations using our city coordinates
+            CITY_INDEX=$((RANDOM % 8))
+            CITY_COORDS="${CITIES[$CITY_INDEX]}"
+            BASE_LAT=$(echo "$CITY_COORDS" | cut -d':' -f1)
+            BASE_LON=$(echo "$CITY_COORDS" | cut -d':' -f2)
+            
+            # Start location with small offset
+            START_LAT_OFFSET=$(echo "scale=4; ($RANDOM % 100 - 50) / 1000" | bc -l 2>/dev/null || echo "0.0250")
+            START_LON_OFFSET=$(echo "scale=4; ($RANDOM % 100 - 50) / 1000" | bc -l 2>/dev/null || echo "0.0250")
+            START_LAT=$(echo "scale=4; $BASE_LAT + $START_LAT_OFFSET" | bc -l 2>/dev/null || echo "$BASE_LAT")
+            START_LON=$(echo "scale=4; $BASE_LON + $START_LON_OFFSET" | bc -l 2>/dev/null || echo "$BASE_LON")
+            
+            # End location with different offset (same city for realistic trips)
+            END_LAT_OFFSET=$(echo "scale=4; ($RANDOM % 200 - 100) / 1000" | bc -l 2>/dev/null || echo "0.0500")
+            END_LON_OFFSET=$(echo "scale=4; ($RANDOM % 200 - 100) / 1000" | bc -l 2>/dev/null || echo "0.0500")
+            END_LAT=$(echo "scale=4; $BASE_LAT + $END_LAT_OFFSET" | bc -l 2>/dev/null || echo "$BASE_LAT")
+            END_LON=$(echo "scale=4; $BASE_LON + $END_LON_OFFSET" | bc -l 2>/dev/null || echo "$BASE_LON")
             
             # Calculate distance (rough approximation)
             DISTANCE=$((RANDOM % 50 + 5))
@@ -758,7 +819,7 @@ populate_database() {
     print_status "   Created trips for all vehicles"
 
     # Create dummy maintenance records
-    print_status "5. Creating dummy maintenance records..."
+    print_status "6. Creating dummy maintenance records..."
     VEHICLE_IDS=("vehicle1" "vehicle2" "vehicle3" "vehicle4" "vehicle5" "vehicle6" "vehicle7" "vehicle8")
     MAINTENANCE_TYPES=("oil_change" "tire_rotation" "brake_service" "battery_check" "filter_replacement" "inspection" "tune_up" "battery_replacement")
     TECHNICIANS=("John Smith" "Mike Johnson" "Sarah Wilson" "David Brown" "Lisa Garcia" "Tom Davis" "Emma White" "Alex Chen")
@@ -842,7 +903,7 @@ populate_database() {
     print_status "   Created maintenance records for all vehicles"
 
     # Create dummy cost records
-    print_status "6. Creating dummy cost records..."
+    print_status "7. Creating dummy cost records..."
     VEHICLE_IDS=("vehicle1" "vehicle2" "vehicle3" "vehicle4" "vehicle5" "vehicle6" "vehicle7" "vehicle8")
     COST_TYPES=("fuel" "electricity" "maintenance" "insurance" "registration" "parking" "tolls" "cleaning")
     
@@ -948,6 +1009,80 @@ populate_database() {
     echo ""
     echo -e "${YELLOW}You can now login and see the populated dashboard!${NC}"
     echo ""
+}
+
+# Function to ensure admin user exists
+ensure_admin_user() {
+    print_status "Ensuring admin user exists..."
+    
+    # Wait for backend to be ready
+    for i in {1..60}; do
+        if curl -s http://localhost:8081 > /dev/null 2>&1; then
+            print_status "   Backend is ready"
+            break
+        fi
+        if [ $i -eq 60 ]; then
+            print_error "Backend failed to start within 60 seconds"
+            return 1
+        fi
+        sleep 1
+    done
+    
+    # Give backend a moment to fully initialize
+    sleep 2
+    
+    # Try to login first to check if admin exists
+    LOGIN_RESPONSE=$(curl -s -X POST http://localhost:8081/api/auth/login \
+        -H "Content-Type: application/json" \
+        -d '{"username": "admin", "password": "admin123"}')
+    
+    if echo "$LOGIN_RESPONSE" | grep -q "token"; then
+        print_status "   Admin user already exists"
+        return 0
+    fi
+    
+    # If we get here, admin doesn't exist or login failed
+    print_status "   Admin user not found, creating..."
+    
+    # Admin doesn't exist, create it
+    print_status "   Creating admin user..."
+    REGISTER_RESPONSE=$(curl -s -X POST http://localhost:8081/api/auth/register \
+        -H "Content-Type: application/json" \
+        -d '{"username": "admin", "password": "admin123", "email": "admin@fleet.com", "first_name": "Admin", "last_name": "User", "role": "admin"}')
+    
+    if echo "$REGISTER_RESPONSE" | grep -q "token\|success"; then
+        print_status "   Admin user created successfully"
+        return 0
+    else
+        print_warning "   Failed to create admin user, trying alternative method..."
+        
+        # Try creating other test users as well
+        curl -s -X POST http://localhost:8081/api/auth/register \
+            -H "Content-Type: application/json" \
+            -d '{"username": "manager", "password": "manager123", "email": "manager@fleet.com", "first_name": "Manager", "last_name": "User", "role": "manager"}' > /dev/null 2>&1
+        
+        curl -s -X POST http://localhost:8081/api/auth/register \
+            -H "Content-Type: application/json" \
+            -d '{"username": "operator", "password": "operator123", "email": "operator@fleet.com", "first_name": "Operator", "last_name": "User", "role": "operator"}' > /dev/null 2>&1
+        
+        curl -s -X POST http://localhost:8081/api/auth/register \
+            -H "Content-Type: application/json" \
+            -d '{"username": "viewer", "password": "viewer123", "email": "viewer@fleet.com", "first_name": "Viewer", "last_name": "User", "role": "viewer"}' > /dev/null 2>&1
+        
+        # Try login again
+        LOGIN_RESPONSE=$(curl -s -X POST http://localhost:8081/api/auth/login \
+            -H "Content-Type: application/json" \
+            -d '{"username": "admin", "password": "admin123"}')
+        
+        if echo "$LOGIN_RESPONSE" | grep -q "token"; then
+            print_status "   Admin user is now available"
+            return 0
+        else
+            print_error "   Failed to create admin user"
+            print_status "   Response: $REGISTER_RESPONSE"
+            return 1
+        fi
+    fi
 }
 
 # Main script logic
