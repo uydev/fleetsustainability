@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -106,8 +107,20 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         if teleIn.BatteryLevel != 0 {
             batteryPtr = &teleIn.BatteryLevel
         }
+        // Map provided vehicle_id string to ObjectID if valid; otherwise generate a new one
+        var vehicleObjectID primitive.ObjectID
+        if teleIn.VehicleID != "" && len(teleIn.VehicleID) == 24 {
+            if oid, err := primitive.ObjectIDFromHex(teleIn.VehicleID); err == nil {
+                vehicleObjectID = oid
+            } else {
+                vehicleObjectID = primitive.NewObjectID()
+            }
+        } else {
+            vehicleObjectID = primitive.NewObjectID()
+        }
+
         tele := models.Telemetry{
-            VehicleID:    primitive.NewObjectID(), // In a real app, map string to ObjectID
+            VehicleID:    vehicleObjectID,
             Timestamp:    timestamp,
             Location:     teleIn.Location,
             Speed:        teleIn.Speed,
@@ -123,6 +136,24 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             return
         }
         log.WithFields(log.Fields{"vehicle_id": tele.VehicleID}).Info("Stored telemetry")
+
+        // Broadcast to SSE subscribers (use original string vehicle_id for clients)
+        if telemetrySSEHub != nil {
+            eventPayload := map[string]interface{}{
+                "vehicle_id":    teleIn.VehicleID,
+                "timestamp":     teleIn.Timestamp,
+                "location":      teleIn.Location,
+                "speed":         teleIn.Speed,
+                "fuel_level":    teleIn.FuelLevel,
+                "battery_level": teleIn.BatteryLevel,
+                "emissions":     teleIn.Emissions,
+                "type":          teleIn.Type,
+                "status":        teleIn.Status,
+            }
+            if data, err := json.Marshal(eventPayload); err == nil {
+                telemetrySSEHub.Broadcast(data)
+            }
+        }
         w.WriteHeader(http.StatusOK)
         w.Write([]byte("ok"))
     case http.MethodGet:
@@ -186,6 +217,78 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
     }
 }
+
+// --- Simple SSE Hub for broadcasting telemetry updates ---
+type SSEHub struct {
+    mu      sync.RWMutex
+    clients map[chan []byte]struct{}
+}
+
+func NewSSEHub() *SSEHub {
+    return &SSEHub{clients: make(map[chan []byte]struct{})}
+}
+
+func (h *SSEHub) Broadcast(data []byte) {
+    h.mu.RLock()
+    defer h.mu.RUnlock()
+    for ch := range h.clients {
+        select {
+        case ch <- data:
+        default:
+            // Drop if client is slow
+        }
+    }
+}
+
+func (h *SSEHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "text/event-stream")
+    w.Header().Set("Cache-Control", "no-cache")
+    w.Header().Set("Connection", "keep-alive")
+    w.Header().Set("Access-Control-Allow-Origin", "*")
+
+    flusher, ok := w.(http.Flusher)
+    if !ok {
+        http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+        return
+    }
+
+    clientCh := make(chan []byte, 16)
+    h.mu.Lock()
+    h.clients[clientCh] = struct{}{}
+    h.mu.Unlock()
+
+    defer func() {
+        h.mu.Lock()
+        delete(h.clients, clientCh)
+        h.mu.Unlock()
+        close(clientCh)
+    }()
+
+    // Initial comment to open stream
+    _, _ = w.Write([]byte(": connected\n\n"))
+    flusher.Flush()
+
+    ticker := time.NewTicker(20 * time.Second)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-r.Context().Done():
+            return
+        case <-ticker.C:
+            // Keepalive comment
+            _, _ = w.Write([]byte(": keepalive\n\n"))
+            flusher.Flush()
+        case msg := <-clientCh:
+            _, _ = w.Write([]byte("data: "))
+            _, _ = w.Write(msg)
+            _, _ = w.Write([]byte("\n\n"))
+            flusher.Flush()
+        }
+    }
+}
+
+var telemetrySSEHub *SSEHub
 
 // TelemetryMetricsHandler handles metrics API requests for telemetry data.
 type TelemetryMetricsHandler struct {
@@ -1105,6 +1208,9 @@ func main() {
     // Protected routes (require authentication)
     // Temporarily disable rate limiting for development
     http.Handle("/api/telemetry", corsMiddleware(authMiddleware.Authenticate(telemetryHandler)))
+    // SSE endpoint (unauth for now; can wrap with authMiddleware if desired)
+    telemetrySSEHub = NewSSEHub()
+    http.Handle("/api/telemetry/stream", corsMiddleware(telemetrySSEHub))
     http.Handle("/api/vehicles", corsMiddleware(authMiddleware.Authenticate(http.HandlerFunc(vehicleRouter))))
     http.Handle("/api/vehicles/", corsMiddleware(authMiddleware.Authenticate(http.HandlerFunc(vehicleRouter))))
     http.Handle("/api/trips", corsMiddleware(authMiddleware.Authenticate(tripHandler)))

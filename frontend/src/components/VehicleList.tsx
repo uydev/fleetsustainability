@@ -26,13 +26,15 @@ import { Telemetry } from '../types';
 
 interface VehicleListProps {
   telemetry: Telemetry[];
+  onVehicleFocus?: (vehicleId: string) => void;
 }
 
 interface VehicleRowProps {
   vehicle: Telemetry;
+  onVehicleFocus?: (vehicleId: string) => void;
 }
 
-const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle }) => {
+const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle, onVehicleFocus }) => {
   const [expanded, setExpanded] = useState(false);
 
   const getVehicleType = (vehicle: Telemetry): 'ICE' | 'EV' => {
@@ -69,11 +71,23 @@ const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle }) => {
 
   return (
     <>
-      <TableRow hover>
+      <TableRow 
+        hover 
+        onClick={() => {
+          setExpanded(!expanded);
+          if (onVehicleFocus) {
+            onVehicleFocus(vehicle.vehicle_id);
+          }
+        }}
+        sx={{ cursor: 'pointer' }}
+      >
         <TableCell>
           <IconButton
             size="small"
-            onClick={() => setExpanded(!expanded)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded(!expanded);
+            }}
           >
             {expanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
           </IconButton>
@@ -177,7 +191,7 @@ const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle }) => {
   );
 };
 
-const VehicleList: React.FC<VehicleListProps> = ({ telemetry }) => {
+const VehicleList: React.FC<VehicleListProps> = ({ telemetry, onVehicleFocus }) => {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
@@ -222,7 +236,7 @@ const VehicleList: React.FC<VehicleListProps> = ({ telemetry }) => {
           </TableHead>
           <TableBody>
             {paginatedTelemetry.map((vehicle, index) => (
-              <VehicleRow key={`${vehicle.vehicle_id}-${index}`} vehicle={vehicle} />
+              <VehicleRow key={`${vehicle.vehicle_id}-${index}`} vehicle={vehicle} onVehicleFocus={onVehicleFocus} />
             ))}
           </TableBody>
         </Table>
