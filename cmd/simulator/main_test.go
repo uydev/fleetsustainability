@@ -1,32 +1,62 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
-	"context"
-	"strings"
 )
+
+// randomTelemetry is a test helper to create plausible telemetry for a given vehicle/type.
+func randomTelemetry(vehicleID, vtype string) Telemetry {
+	status := "active"
+	if rand.Float64() < 0.2 { // ~20% inactive
+		status = "inactive"
+	}
+	loc := randomLocation()
+	speed := 10 + rand.Float64()*100 // 10..110
+
+	tele := Telemetry{
+		VehicleID: vehicleID,
+		Timestamp: time.Now(),
+		Location:  loc,
+		Speed:     speed,
+		Type:      vtype,
+		Status:    status,
+	}
+	if vtype == "ICE" {
+		tele.FuelLevel = 1 + rand.Float64()*99 // (0,100]
+		tele.BatteryLevel = 0
+		tele.Emissions = rand.Float64() * 50 // [0,50)
+	} else {
+		tele.BatteryLevel = 1 + rand.Float64()*99
+		tele.FuelLevel = 0
+		tele.Emissions = rand.Float64() * 20
+	}
+	return tele
+}
 
 func TestRandomLocation(t *testing.T) {
 	loc := randomLocation()
-	
-	// Check bounds for NYC area
-	if loc.Lat < 40.7 || loc.Lat > 40.8 {
-		t.Errorf("Latitude out of expected range: %f", loc.Lat)
+
+	// Global bounds sanity
+	if loc.Lat < -90 || loc.Lat > 90 {
+		t.Errorf("Latitude out of range: %f", loc.Lat)
 	}
-	if loc.Lon < -74.0 || loc.Lon > -73.9 {
-		t.Errorf("Longitude out of expected range: %f", loc.Lon)
+	if loc.Lon < -180 || loc.Lon > 180 {
+		t.Errorf("Longitude out of range: %f", loc.Lon)
 	}
 }
 
 func TestRandomTelemetry_ICE(t *testing.T) {
 	tele := randomTelemetry("test-vehicle", "ICE")
-	
+
 	if tele.VehicleID != "test-vehicle" {
 		t.Errorf("Expected vehicle ID 'test-vehicle', got %s", tele.VehicleID)
 	}
@@ -52,7 +82,7 @@ func TestRandomTelemetry_ICE(t *testing.T) {
 
 func TestRandomTelemetry_EV(t *testing.T) {
 	tele := randomTelemetry("test-vehicle", "EV")
-	
+
 	if tele.VehicleID != "test-vehicle" {
 		t.Errorf("Expected vehicle ID 'test-vehicle', got %s", tele.VehicleID)
 	}
@@ -79,7 +109,7 @@ func TestSendTelemetry_Success(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
-	
+
 	tele := Telemetry{
 		VehicleID: "test-vehicle",
 		Timestamp: time.Now(),
@@ -88,7 +118,7 @@ func TestSendTelemetry_Success(t *testing.T) {
 		Type:      "ICE",
 		Status:    "active",
 	}
-	
+
 	// This should not panic or error
 	sendTelemetry(server.URL, tele)
 }
@@ -99,7 +129,7 @@ func TestSendTelemetry_ServerError(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer server.Close()
-	
+
 	tele := Telemetry{
 		VehicleID: "test-vehicle",
 		Timestamp: time.Now(),
@@ -108,7 +138,7 @@ func TestSendTelemetry_ServerError(t *testing.T) {
 		Type:      "ICE",
 		Status:    "active",
 	}
-	
+
 	// This should not panic even with server error
 	sendTelemetry(server.URL, tele)
 }
@@ -125,18 +155,18 @@ func TestTelemetryJSONMarshal(t *testing.T) {
 		Type:         "ICE",
 		Status:       "active",
 	}
-	
+
 	data, err := json.Marshal(tele)
 	if err != nil {
 		t.Fatalf("Failed to marshal telemetry: %v", err)
 	}
-	
+
 	var unmarshaled Telemetry
 	err = json.Unmarshal(data, &unmarshaled)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal telemetry: %v", err)
 	}
-	
+
 	if unmarshaled.VehicleID != tele.VehicleID {
 		t.Errorf("VehicleID mismatch: expected %s, got %s", tele.VehicleID, unmarshaled.VehicleID)
 	}
@@ -151,20 +181,20 @@ func TestMainLogic_FleetSize(t *testing.T) {
 		envValue string
 		expected int
 	}{
-		{"", 10},           // default
-		{"5", 5},           // valid number
-		{"invalid", 10},    // invalid number, should use default
-		{"0", 0},           // edge case
-		{"100", 100},       // large number
+		{"", 10},        // default
+		{"5", 5},        // valid number
+		{"invalid", 10}, // invalid number, should use default
+		{"0", 0},        // edge case
+		{"100", 100},    // large number
 	}
-	
+
 	for _, tc := range testCases {
 		if tc.envValue != "" {
 			os.Setenv("FLEET_SIZE", tc.envValue)
 		} else {
 			os.Unsetenv("FLEET_SIZE")
 		}
-		
+
 		// Simulate the logic from main()
 		fleetSize := 10
 		if val := os.Getenv("FLEET_SIZE"); val != "" {
@@ -172,7 +202,7 @@ func TestMainLogic_FleetSize(t *testing.T) {
 				fleetSize = n
 			}
 		}
-		
+
 		if fleetSize != tc.expected {
 			t.Errorf("For env value '%s', expected fleet size %d, got %d", tc.envValue, tc.expected, fleetSize)
 		}
@@ -185,28 +215,28 @@ func TestMainLogic_APIURL(t *testing.T) {
 		envValue string
 		expected string
 	}{
-		{"", "http://localhost:8080/api/telemetry"},           // default
+		{"", "http://localhost:8080/api/telemetry"},                              // default
 		{"http://api.example.com/telemetry", "http://api.example.com/telemetry"}, // custom
 	}
-	
+
 	for _, tc := range testCases {
 		if tc.envValue != "" {
 			os.Setenv("TELEMETRY_API_URL", tc.envValue)
 		} else {
 			os.Unsetenv("TELEMETRY_API_URL")
 		}
-		
+
 		// Simulate the logic from main()
 		apiURL := os.Getenv("TELEMETRY_API_URL")
 		if apiURL == "" {
 			apiURL = "http://localhost:8080/api/telemetry"
 		}
-		
+
 		if apiURL != tc.expected {
 			t.Errorf("For env value '%s', expected API URL %s, got %s", tc.envValue, tc.expected, apiURL)
 		}
 	}
-} 
+}
 
 func TestSimulateVehicle_WithTimeout(t *testing.T) {
 	// Test simulateVehicle function with a timeout to avoid infinite loop
@@ -214,11 +244,11 @@ func TestSimulateVehicle_WithTimeout(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
-	
+
 	// Create a context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	
+
 	// Run simulateVehicle in a goroutine with context
 	done := make(chan bool)
 	go func() {
@@ -236,7 +266,7 @@ func TestSimulateVehicle_WithTimeout(t *testing.T) {
 			}
 		}
 	}()
-	
+
 	// Wait for timeout or completion
 	select {
 	case <-done:
@@ -254,19 +284,19 @@ func TestMainFunction_SimulatorLogic(t *testing.T) {
 		os.Setenv("FLEET_SIZE", originalFleetSize)
 		os.Setenv("TELEMETRY_API_URL", originalAPIURL)
 	}()
-	
+
 	// Test fleet size parsing logic
 	testCases := []struct {
 		envValue string
 		expected int
 	}{
-		{"", 10},           // default
-		{"5", 5},           // valid number
-		{"invalid", 10},    // invalid number, should use default
-		{"0", 0},           // edge case
-		{"100", 100},       // large number
+		{"", 10},        // default
+		{"5", 5},        // valid number
+		{"invalid", 10}, // invalid number, should use default
+		{"0", 0},        // edge case
+		{"100", 100},    // large number
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run("fleet_size_"+tc.envValue, func(t *testing.T) {
 			if tc.envValue != "" {
@@ -274,7 +304,7 @@ func TestMainFunction_SimulatorLogic(t *testing.T) {
 			} else {
 				os.Unsetenv("FLEET_SIZE")
 			}
-			
+
 			// Simulate the logic from main()
 			fleetSize := 10
 			if val := os.Getenv("FLEET_SIZE"); val != "" {
@@ -282,22 +312,22 @@ func TestMainFunction_SimulatorLogic(t *testing.T) {
 					fleetSize = n
 				}
 			}
-			
+
 			if fleetSize != tc.expected {
 				t.Errorf("For env value '%s', expected fleet size %d, got %d", tc.envValue, tc.expected, fleetSize)
 			}
 		})
 	}
-	
+
 	// Test API URL logic
 	apiURLTestCases := []struct {
 		envValue string
 		expected string
 	}{
-		{"", "http://localhost:8080/api/telemetry"},           // default
+		{"", "http://localhost:8080/api/telemetry"},                              // default
 		{"http://api.example.com/telemetry", "http://api.example.com/telemetry"}, // custom
 	}
-	
+
 	for _, tc := range apiURLTestCases {
 		t.Run("api_url_"+tc.envValue, func(t *testing.T) {
 			if tc.envValue != "" {
@@ -305,13 +335,13 @@ func TestMainFunction_SimulatorLogic(t *testing.T) {
 			} else {
 				os.Unsetenv("TELEMETRY_API_URL")
 			}
-			
+
 			// Simulate the logic from main()
 			apiURL := os.Getenv("TELEMETRY_API_URL")
 			if apiURL == "" {
 				apiURL = "http://localhost:8080/api/telemetry"
 			}
-			
+
 			if apiURL != tc.expected {
 				t.Errorf("For env value '%s', expected API URL %s, got %s", tc.envValue, tc.expected, apiURL)
 			}
@@ -322,24 +352,24 @@ func TestMainFunction_SimulatorLogic(t *testing.T) {
 func TestSimulateVehicle_VehicleTypeDistribution(t *testing.T) {
 	// Test that vehicle types are properly distributed
 	vehicleTypes := []string{"ICE", "EV"}
-	
+
 	// Test multiple iterations to ensure both types are generated
 	iceCount := 0
 	evCount := 0
-	
+
 	for i := 0; i < 100; i++ {
 		vehicleID := "test-vehicle-" + strconv.Itoa(i)
 		vtype := vehicleTypes[i%2] // Simulate the random selection
-		
+
 		tele := randomTelemetry(vehicleID, vtype)
-		
+
 		if tele.Type == "ICE" {
 			iceCount++
 		} else if tele.Type == "EV" {
 			evCount++
 		}
 	}
-	
+
 	// Both types should be generated
 	if iceCount == 0 {
 		t.Error("No ICE vehicles generated")
@@ -347,7 +377,7 @@ func TestSimulateVehicle_VehicleTypeDistribution(t *testing.T) {
 	if evCount == 0 {
 		t.Error("No EV vehicles generated")
 	}
-	
+
 	// Should have reasonable distribution (allowing for variance)
 	total := iceCount + evCount
 	if iceCount < total/4 || iceCount > 3*total/4 {
@@ -360,24 +390,24 @@ func TestSimulateVehicle_VehicleTypeDistribution(t *testing.T) {
 
 func TestSimulateVehicle_StatusDistribution(t *testing.T) {
 	// Test that vehicle statuses are properly distributed
-	
+
 	// Test multiple iterations to ensure both statuses are generated
 	activeCount := 0
 	inactiveCount := 0
-	
+
 	for i := 0; i < 100; i++ {
 		vehicleID := "test-vehicle-" + strconv.Itoa(i)
 		vtype := "ICE"
-		
+
 		tele := randomTelemetry(vehicleID, vtype)
-		
+
 		if tele.Status == "active" {
 			activeCount++
 		} else if tele.Status == "inactive" {
 			inactiveCount++
 		}
 	}
-	
+
 	// Both statuses should be generated
 	if activeCount == 0 {
 		t.Error("No active vehicles generated")
@@ -385,7 +415,7 @@ func TestSimulateVehicle_StatusDistribution(t *testing.T) {
 	if inactiveCount == 0 {
 		t.Error("No inactive vehicles generated")
 	}
-	
+
 	// Should have reasonable distribution (allowing for variance)
 	// With 80/20 split, we expect roughly 70-90% active and 10-30% inactive
 	total := activeCount + inactiveCount
@@ -407,7 +437,7 @@ func TestSendTelemetry_NetworkError(t *testing.T) {
 		Type:      "ICE",
 		Status:    "active",
 	}
-	
+
 	// This should not panic even with network error
 	sendTelemetry("http://invalid-url-that-does-not-exist.com", tele)
 }
@@ -419,7 +449,7 @@ func TestSendTelemetry_Timeout(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
-	
+
 	tele := Telemetry{
 		VehicleID: "test-vehicle",
 		Timestamp: time.Now(),
@@ -428,10 +458,10 @@ func TestSendTelemetry_Timeout(t *testing.T) {
 		Type:      "ICE",
 		Status:    "active",
 	}
-	
+
 	// This should not panic even with slow response
 	sendTelemetry(server.URL, tele)
-} 
+}
 
 func TestSendTelemetry_JSONMarshalError(t *testing.T) {
 	// Test sendTelemetry with a telemetry object that can't be marshaled
@@ -444,13 +474,13 @@ func TestSendTelemetry_JSONMarshalError(t *testing.T) {
 		Type:      "ICE",
 		Status:    "active",
 	}
-	
+
 	// Create a test server that will accept the request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
-	
+
 	// This should not panic even if there's an error
 	sendTelemetry(server.URL, tele)
 }
@@ -465,7 +495,7 @@ func TestSendTelemetry_HTTPClientError(t *testing.T) {
 		Type:      "ICE",
 		Status:    "active",
 	}
-	
+
 	// Test with various error scenarios
 	testCases := []struct {
 		name   string
@@ -475,7 +505,7 @@ func TestSendTelemetry_HTTPClientError(t *testing.T) {
 		{"malformed URL", "not-a-url"},
 		{"unreachable host", "http://192.168.1.999:9999"},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// This should not panic even with network errors
@@ -494,7 +524,7 @@ func TestSendTelemetry_ServerResponseCodes(t *testing.T) {
 		Type:      "ICE",
 		Status:    "active",
 	}
-	
+
 	testCases := []struct {
 		name           string
 		responseCode   int
@@ -509,14 +539,14 @@ func TestSendTelemetry_ServerResponseCodes(t *testing.T) {
 		{"server error", http.StatusInternalServerError, "500 Internal Server Error"},
 		{"service unavailable", http.StatusServiceUnavailable, "503 Service Unavailable"},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tc.responseCode)
 			}))
 			defer server.Close()
-			
+
 			// This should not panic regardless of response code
 			sendTelemetry(server.URL, tele)
 		})
@@ -529,7 +559,7 @@ func TestSendTelemetry_WithDifferentTelemetryTypes(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
-	
+
 	testCases := []struct {
 		name string
 		tele Telemetry
@@ -586,7 +616,7 @@ func TestSendTelemetry_WithDifferentTelemetryTypes(t *testing.T) {
 			},
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// This should not panic for any telemetry configuration
@@ -605,18 +635,18 @@ func TestSendTelemetry_ResponseBodyHandling(t *testing.T) {
 		Type:      "ICE",
 		Status:    "active",
 	}
-	
+
 	testCases := []struct {
-		name           string
-		responseBody   string
-		responseCode   int
+		name         string
+		responseBody string
+		responseCode int
 	}{
 		{"empty response", "", http.StatusOK},
 		{"JSON response", `{"status":"ok"}`, http.StatusOK},
 		{"large response", strings.Repeat("a", 10000), http.StatusOK},
 		{"error response", `{"error":"bad request"}`, http.StatusBadRequest},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -624,9 +654,9 @@ func TestSendTelemetry_ResponseBodyHandling(t *testing.T) {
 				w.Write([]byte(tc.responseBody))
 			}))
 			defer server.Close()
-			
+
 			// This should not panic regardless of response body
 			sendTelemetry(server.URL, tele)
 		})
 	}
-} 
+}

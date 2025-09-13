@@ -1,8 +1,8 @@
 package models
 
 import (
-	"time"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"time"
 )
 
 // Vehicle represents a fleet vehicle.
@@ -15,4 +15,4 @@ type Vehicle struct {
 	CurrentLocation Location           `bson:"current_location" json:"current_location"`
 	Status          string             `bson:"status" json:"status"` // "active" or "inactive"
 	CreatedAt       time.Time          `bson:"created_at" json:"created_at"`
-} 
+}

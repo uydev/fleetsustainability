@@ -78,7 +78,7 @@ func TestUser_HasPermission(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := tt.user.HasPermission(tt.action)
 			if result != tt.expected {
-				t.Errorf("User with role %s HasPermission(%s) = %v, want %v", 
+				t.Errorf("User with role %s HasPermission(%s) = %v, want %v",
 					tt.user.Role, tt.action, result, tt.expected)
 			}
 		})
@@ -131,4 +131,4 @@ func TestUser_StructFields(t *testing.T) {
 	if user.UpdatedAt != now {
 		t.Errorf("Expected UpdatedAt to be set, got %v", user.UpdatedAt)
 	}
-} 
+}

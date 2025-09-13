@@ -1,8 +1,8 @@
 package models
 
 import (
-	"time"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"time"
 )
 
 // Role represents user roles in the system
@@ -18,16 +18,16 @@ const (
 // User represents a user in the system
 type User struct {
 	ID           primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	Username     string            `bson:"username" json:"username"`
-	Email        string            `bson:"email" json:"email"`
-	PasswordHash string            `bson:"password_hash" json:"-"`
-	Role         Role              `bson:"role" json:"role"`
-	FirstName    string            `bson:"first_name" json:"first_name"`
-	LastName     string            `bson:"last_name" json:"last_name"`
-	IsActive     bool              `bson:"is_active" json:"is_active"`
-	LastLogin    *time.Time        `bson:"last_login,omitempty" json:"last_login,omitempty"`
-	CreatedAt    time.Time         `bson:"created_at" json:"created_at"`
-	UpdatedAt    time.Time         `bson:"updated_at" json:"updated_at"`
+	Username     string             `bson:"username" json:"username"`
+	Email        string             `bson:"email" json:"email"`
+	PasswordHash string             `bson:"password_hash" json:"-"`
+	Role         Role               `bson:"role" json:"role"`
+	FirstName    string             `bson:"first_name" json:"first_name"`
+	LastName     string             `bson:"last_name" json:"last_name"`
+	IsActive     bool               `bson:"is_active" json:"is_active"`
+	LastLogin    *time.Time         `bson:"last_login,omitempty" json:"last_login,omitempty"`
+	CreatedAt    time.Time          `bson:"created_at" json:"created_at"`
+	UpdatedAt    time.Time          `bson:"updated_at" json:"updated_at"`
 }
 
 // LoginRequest represents a login request
@@ -89,4 +89,4 @@ func (u *User) HasPermission(action string) bool {
 	default:
 		return false
 	}
-} 
+}

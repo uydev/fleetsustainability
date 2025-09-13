@@ -495,4 +495,4 @@ func TestAuthHandler_ChangePassword(t *testing.T) {
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 		mockUserCollection.AssertExpectations(t)
 	})
-} 
+}

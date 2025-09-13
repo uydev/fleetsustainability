@@ -148,14 +148,14 @@ func (m *RateLimitMiddleware) RateLimit(maxRequests int, windowSeconds int) func
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Get client IP
 			clientIP := getClientIP(r)
-			
+
 			// Clean old requests outside the window
 			now := time.Now().Unix()
 			windowStart := now - int64(windowSeconds)
-			
+
 			// Use write lock for map operations
 			m.mu.Lock()
-			
+
 			if timestamps, exists := m.requests[clientIP]; exists {
 				var validTimestamps []int64
 				for _, ts := range timestamps {
@@ -175,7 +175,7 @@ func (m *RateLimitMiddleware) RateLimit(maxRequests int, windowSeconds int) func
 
 			// Add current request
 			m.requests[clientIP] = append(m.requests[clientIP], now)
-			
+
 			// Release lock
 			m.mu.Unlock()
 
@@ -193,11 +193,11 @@ func getClientIP(r *http.Request) string {
 	if ip := r.Header.Get("X-Real-IP"); ip != "" {
 		return ip
 	}
-	
+
 	// Fall back to remote address
 	ip := r.RemoteAddr
 	if colonIndex := strings.LastIndex(ip, ":"); colonIndex != -1 {
 		ip = ip[:colonIndex]
 	}
 	return ip
-} 
+}

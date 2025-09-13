@@ -251,7 +251,7 @@ func TestRateLimitMiddleware(t *testing.T) {
 		})
 
 		rateLimitHandler := middleware.RateLimit(1, 60)(handler)
-		
+
 		// First request should succeed
 		rateLimitHandler.ServeHTTP(w, req)
 		assert.True(t, handlerCalled)
@@ -274,7 +274,7 @@ func TestGetUserFromContext(t *testing.T) {
 	}
 
 	ctx := context.WithValue(context.Background(), UserContextKey, claims)
-	
+
 	retrievedClaims, ok := GetUserFromContext(ctx)
 	assert.True(t, ok)
 	assert.Equal(t, claims.UserID, retrievedClaims.UserID)
@@ -285,4 +285,4 @@ func TestGetUserFromContext(t *testing.T) {
 	emptyCtx := context.Background()
 	_, ok = GetUserFromContext(emptyCtx)
 	assert.False(t, ok)
-} 
+}

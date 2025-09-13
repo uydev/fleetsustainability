@@ -15,14 +15,14 @@ import (
 
 // AuthHandler handles authentication requests
 type AuthHandler struct {
-	authService *auth.Service
+	authService    *auth.Service
 	userCollection db.UserCollection
 }
 
 // NewAuthHandler creates a new authentication handler
 func NewAuthHandler(authService *auth.Service, userCollection db.UserCollection) *AuthHandler {
 	return &AuthHandler{
-		authService: authService,
+		authService:    authService,
 		userCollection: userCollection,
 	}
 }
@@ -375,4 +375,4 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Password changed successfully"})
-} 
+}

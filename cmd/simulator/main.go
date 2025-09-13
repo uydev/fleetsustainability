@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	log "github.com/sirupsen/logrus"
+	"io"
 	"math"
 	"math/rand"
 	"net/http"
 	"os"
 	"strconv"
 	"time"
-	"io"
 )
 
 // Location represents a geographical location with latitude and longitude coordinates.
@@ -39,20 +39,20 @@ type Telemetry struct {
 	FuelLevel    float64   `json:"fuel_level,omitempty"`
 	BatteryLevel float64   `json:"battery_level,omitempty"`
 	Emissions    float64   `json:"emissions"`
-	Type         string    `json:"type"` // "ICE" or "EV"
+	Type         string    `json:"type"`   // "ICE" or "EV"
 	Status       string    `json:"status"` // "active" or "inactive"
 }
 
 // Cities for realistic routes
 var cities = []Location{
-	{Lat: 51.5074, Lon: -0.1278},   // London
-	{Lat: 40.7128, Lon: -74.0060},  // New York
-	{Lat: 40.4168, Lon: -3.7038},   // Madrid
-	{Lat: 35.1856, Lon: 33.3823},   // Nicosia
-	{Lat: 4.7110, Lon: -74.0721},   // Bogotá
-	{Lat: 48.8566, Lon: 2.3522},    // Paris
-	{Lat: 41.0082, Lon: 28.9784},   // Istanbul
-	{Lat: 51.4816, Lon: -3.1791},   // Cardiff
+	{Lat: 51.5074, Lon: -0.1278},  // London
+	{Lat: 40.7128, Lon: -74.0060}, // New York
+	{Lat: 40.4168, Lon: -3.7038},  // Madrid
+	{Lat: 35.1856, Lon: 33.3823},  // Nicosia
+	{Lat: 4.7110, Lon: -74.0721},  // Bogotá
+	{Lat: 48.8566, Lon: 2.3522},   // Paris
+	{Lat: 41.0082, Lon: 28.9784},  // Istanbul
+	{Lat: 51.4816, Lon: -3.1791},  // Cardiff
 	// Added more cities for wider global spread
 	{Lat: 34.0522, Lon: -118.2437}, // Los Angeles
 	{Lat: 37.7749, Lon: -122.4194}, // San Francisco
@@ -105,11 +105,11 @@ func createVehicle(apiURL string, initialVehicleID string, vtype string) (string
 		"ICE": {"F-150", "Silverado", "Camry", "Civic", "X5"},
 		"EV":  {"Model 3", "Leaf", "Bolt", "Mach-E", "e-tron"},
 	}
-	
+
 	make := makes[vtype][rand.Intn(len(makes[vtype]))]
 	model := models[vtype][rand.Intn(len(models[vtype]))]
 	year := 2020 + rand.Intn(5) // 2020-2024
-	
+
 	vehicle := Vehicle{
 		Type:            vtype,
 		Make:            make,
@@ -118,39 +118,39 @@ func createVehicle(apiURL string, initialVehicleID string, vtype string) (string
 		CurrentLocation: randomLocation(),
 		Status:          "active",
 	}
-	
+
 	data, err := json.Marshal(vehicle)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal vehicle: %w", err)
 	}
-	
+
 	resp, err := authorizedPost(apiURL+"/vehicles", "application/json", bytes.NewBuffer(data))
 	if err != nil {
 		return "", fmt.Errorf("failed to create vehicle: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusCreated {
 		return "", fmt.Errorf("vehicle creation failed with status: %d", resp.StatusCode)
 	}
-	
+
 	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", fmt.Errorf("failed to decode response: %w", err)
 	}
-	
+
 	createdVehicleID, ok := result["id"].(string)
 	if !ok {
 		return "", fmt.Errorf("invalid vehicle ID in response")
 	}
-	
+
 	log.WithFields(log.Fields{
 		"vehicle_id": createdVehicleID,
 		"type":       vtype,
 		"make":       make,
 		"model":      model,
 	}).Info("Created vehicle")
-	
+
 	return createdVehicleID, nil
 }
 
@@ -217,7 +217,9 @@ func fetchOSRMRoute(start, end Location) ([]Location, error) {
 	coords := obj.Routes[0].Geometry.Coordinates
 	pts := make([]Location, 0, len(coords))
 	for _, c := range coords {
-		if len(c) < 2 { continue }
+		if len(c) < 2 {
+			continue
+		}
 		pts = append(pts, Location{Lat: c[1], Lon: c[0]})
 	}
 	return pts, nil
@@ -263,8 +265,12 @@ func stepAlongRoute(s *VehicleState, tickSec float64) {
 		}
 		// stay on current segment
 		t := (s.Route.SegOffset + remKm) / segLen
-		if t < 0 { t = 0 }
-		if t > 1 { t = 1 }
+		if t < 0 {
+			t = 0
+		}
+		if t > 1 {
+			t = 1
+		}
 		s.Position = lerp(a, b, t)
 		s.Route.SegOffset += remKm
 		remKm = 0
@@ -313,14 +319,20 @@ func sendTelemetry(apiURL string, tele Telemetry) {
 }
 
 func simulateVehicle(apiURL string, s *VehicleState, interval time.Duration) {
-	if s.Route == nil { planNewRoute(s) }
+	if s.Route == nil {
+		planNewRoute(s)
+	}
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	for range tick.C {
 		// small speed noise
 		s.SpeedKmh += (rand.Float64()*2 - 1) * 1.5
-		if s.SpeedKmh < 15 { s.SpeedKmh = 15 }
-		if s.SpeedKmh > 90 { s.SpeedKmh = 90 }
+		if s.SpeedKmh < 15 {
+			s.SpeedKmh = 15
+		}
+		if s.SpeedKmh > 90 {
+			s.SpeedKmh = 90
+		}
 
 		stepAlongRoute(s, interval.Seconds())
 
@@ -328,10 +340,14 @@ func simulateVehicle(apiURL string, s *VehicleState, interval time.Duration) {
 		km := s.SpeedKmh * (interval.Seconds() / 3600.0)
 		if s.Type == "ICE" {
 			s.FuelPct -= km * 0.4
-			if s.FuelPct < 5 { s.FuelPct = 100 }
+			if s.FuelPct < 5 {
+				s.FuelPct = 100
+			}
 		} else {
 			s.BatteryPct -= km * 0.8
-			if s.BatteryPct < 5 { s.BatteryPct = 100 }
+			if s.BatteryPct < 5 {
+				s.BatteryPct = 100
+			}
 		}
 
 		sendTelemetry(apiURL, telemetryFromState(s))
@@ -341,32 +357,32 @@ func simulateVehicle(apiURL string, s *VehicleState, interval time.Duration) {
 func main() {
 	// Optional JWT for protected API
 	authToken = os.Getenv("SIM_AUTH_TOKEN")
-	
+
 	fleetSize := 10
 	if val := os.Getenv("FLEET_SIZE"); val != "" {
 		if n, err := strconv.Atoi(val); err == nil {
 			fleetSize = n
 		}
 	}
-	
+
 	apiURL := os.Getenv("API_BASE_URL")
 	if apiURL == "" {
 		apiURL = "http://localhost:8081/api"
 	}
-	
+
 	interval := 2 * time.Second
 	if v := os.Getenv("SIM_TICK_SECONDS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 1 {
 			interval = time.Duration(n) * time.Second
 		}
 	}
-	
+
 	log.WithFields(log.Fields{
 		"fleet_size": fleetSize,
 		"api_url":    apiURL,
 		"interval":   interval,
 	}).Info("Starting fleet simulation")
-	
+
 	// Create vehicles and states
 	states := make([]*VehicleState, 0, fleetSize)
 	for i := 0; i < fleetSize; i++ {
@@ -387,18 +403,18 @@ func main() {
 		}
 		states = append(states, state)
 	}
-	
+
 	log.WithField("created_vehicles", len(states)).Info("Vehicle creation completed")
 	if len(states) == 0 {
 		log.Error("No vehicles created. Ensure SIM_AUTH_TOKEN is valid and API is reachable. Exiting.")
 		time.Sleep(2 * time.Second)
 		return
 	}
-	
+
 	for _, s := range states {
 		go simulateVehicle(apiURL, s, interval)
 	}
-	
+
 	log.Info("Telemetry simulation started")
 	select {} // Block forever
 }

@@ -32,7 +32,7 @@ func (c *MongoUserCollection) InsertUser(ctx context.Context, user models.User) 
 	user.CreatedAt = time.Now()
 	user.UpdatedAt = time.Now()
 	user.IsActive = true
-	
+
 	_, err := c.Collection.InsertOne(ctx, user)
 	return err
 }
@@ -43,13 +43,13 @@ func (c *MongoUserCollection) FindUserByID(ctx context.Context, id string) (*mod
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var user models.User
 	err = c.Collection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&user)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &user, nil
 }
 
@@ -60,7 +60,7 @@ func (c *MongoUserCollection) FindUserByUsername(ctx context.Context, username s
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &user, nil
 }
 
@@ -71,7 +71,7 @@ func (c *MongoUserCollection) FindUserByEmail(ctx context.Context, email string)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &user, nil
 }
 
@@ -86,10 +86,10 @@ func (c *MongoUserCollection) UpdateUser(ctx context.Context, id string, user mo
 	if err != nil {
 		return err
 	}
-	
+
 	user.UpdatedAt = time.Now()
 	user.ID = objectID
-	
+
 	_, err = c.Collection.ReplaceOne(ctx, bson.M{"_id": objectID}, user)
 	return err
 }
@@ -100,7 +100,7 @@ func (c *MongoUserCollection) DeleteUser(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	_, err = c.Collection.DeleteOne(ctx, bson.M{"_id": objectID})
 	return err
 }
@@ -111,7 +111,7 @@ func (c *MongoUserCollection) UpdateLastLogin(ctx context.Context, id string) er
 	if err != nil {
 		return err
 	}
-	
+
 	now := time.Now()
 	_, err = c.Collection.UpdateOne(
 		ctx,
@@ -119,4 +119,4 @@ func (c *MongoUserCollection) UpdateLastLogin(ctx context.Context, id string) er
 		bson.M{"$set": bson.M{"last_login": now, "updated_at": now}},
 	)
 	return err
-} 
+}

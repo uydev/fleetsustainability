@@ -1,101 +1,101 @@
 package main
 
 import (
-    "bytes"
-    "context"
-    "encoding/json"
-    "errors"
-    "net/http"
-    "net/http/httptest"
-    "testing"
-    "time"
-    "math"
-    "fmt"
-    "os"
-    "strings"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+	"time"
 
-    "github.com/golang-jwt/jwt/v5"
-    "github.com/ukydev/fleet-sustainability/internal/models"
-    "go.mongodb.org/mongo-driver/mongo"
-    "go.mongodb.org/mongo-driver/mongo/options"
-    "github.com/ukydev/fleet-sustainability/internal/db"
-    "go.mongodb.org/mongo-driver/bson/primitive"
-    "github.com/sirupsen/logrus"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/sirupsen/logrus"
+	"github.com/ukydev/fleet-sustainability/internal/db"
+	"github.com/ukydev/fleet-sustainability/internal/models"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type mockTelemetryCollection struct {
-    insertErr error
-    findErr   error
-    allErr    error
-    results   []models.Telemetry
+	insertErr error
+	findErr   error
+	allErr    error
+	results   []models.Telemetry
 }
 
 func (m *mockTelemetryCollection) InsertOne(ctx context.Context, doc interface{}, opts ...*options.InsertOneOptions) (*mongo.InsertOneResult, error) {
-    return nil, m.insertErr
+	return nil, m.insertErr
 }
 
 // Mock cursor for testing
 type mockCursor struct {
-    results []models.Telemetry
-    allErr  error
+	results []models.Telemetry
+	allErr  error
 }
 
 func (m *mockCursor) All(ctx context.Context, out interface{}) error {
-    if m.allErr != nil {
-        return m.allErr
-    }
-    ptr, ok := out.(*[]models.Telemetry)
-    if !ok {
-        return errors.New("wrong type for out")
-    }
-    *ptr = m.results
-    return nil
+	if m.allErr != nil {
+		return m.allErr
+	}
+	ptr, ok := out.(*[]models.Telemetry)
+	if !ok {
+		return errors.New("wrong type for out")
+	}
+	*ptr = m.results
+	return nil
 }
 func (m *mockCursor) Close(ctx context.Context) error { return nil }
 
 // Update mockTelemetryCollection.Find to return (db.TelemetryCursor, error) to match the interface. Return nil as the error in the mock implementation.
 func (m *mockTelemetryCollection) Find(ctx context.Context, filter interface{}, opts ...*options.FindOptions) (db.TelemetryCursor, error) {
-    if m.findErr != nil {
-        return nil, m.findErr
-    }
-    // Debug: print the filter
-    fmt.Printf("DEBUG: filter = %#v\n", filter)
-    results := m.results
-    if f, ok := filter.(primitive.M); ok {
-        fmt.Printf("DEBUG: filter keys = %v\n", f)
-        if ts, ok := f["timestamp"].(primitive.M); ok {
-            fmt.Printf("DEBUG: timestamp filter = %v\n", ts)
-            var filtered []models.Telemetry
-            for _, t := range results {
-                inRange := true
-                if gte, ok := ts["$gte"].(time.Time); ok {
-                    fmt.Printf("DEBUG: $gte = %v\n", gte)
-                    if t.Timestamp.Before(gte) {
-                        inRange = false
-                    }
-                }
-                if lte, ok := ts["$lte"].(time.Time); ok {
-                    fmt.Printf("DEBUG: $lte = %v\n", lte)
-                    if t.Timestamp.After(lte) {
-                        inRange = false
-                    }
-                }
-                if inRange {
-                    filtered = append(filtered, t)
-                }
-            }
-            results = filtered
-        }
-    }
-    return &mockCursor{results: results, allErr: m.allErr}, nil
+	if m.findErr != nil {
+		return nil, m.findErr
+	}
+	// Debug: print the filter
+	fmt.Printf("DEBUG: filter = %#v\n", filter)
+	results := m.results
+	if f, ok := filter.(primitive.M); ok {
+		fmt.Printf("DEBUG: filter keys = %v\n", f)
+		if ts, ok := f["timestamp"].(primitive.M); ok {
+			fmt.Printf("DEBUG: timestamp filter = %v\n", ts)
+			var filtered []models.Telemetry
+			for _, t := range results {
+				inRange := true
+				if gte, ok := ts["$gte"].(time.Time); ok {
+					fmt.Printf("DEBUG: $gte = %v\n", gte)
+					if t.Timestamp.Before(gte) {
+						inRange = false
+					}
+				}
+				if lte, ok := ts["$lte"].(time.Time); ok {
+					fmt.Printf("DEBUG: $lte = %v\n", lte)
+					if t.Timestamp.After(lte) {
+						inRange = false
+					}
+				}
+				if inRange {
+					filtered = append(filtered, t)
+				}
+			}
+			results = filtered
+		}
+	}
+	return &mockCursor{results: results, allErr: m.allErr}, nil
 }
 
 func (m *mockTelemetryCollection) InsertTelemetry(ctx context.Context, telemetry models.Telemetry) error {
-    return m.insertErr // simulate DB error if set
+	return m.insertErr // simulate DB error if set
 }
 
 func (m *mockTelemetryCollection) DeleteAll(ctx context.Context) error {
-    return nil // simulate successful deletion
+	return nil // simulate successful deletion
 }
 
 func TestTelemetryHandler_POST_InvalidJSON(t *testing.T) {
@@ -110,7 +110,7 @@ func TestTelemetryHandler_POST_InvalidJSON(t *testing.T) {
 
 func TestTelemetryHandler_POST_MissingRequiredFields(t *testing.T) {
 	handler := &TelemetryHandler{Collection: &mockTelemetryCollection{}}
-	
+
 	testCases := []struct {
 		name     string
 		payload  string
@@ -147,7 +147,7 @@ func TestTelemetryHandler_POST_MissingRequiredFields(t *testing.T) {
 			expected: http.StatusBadRequest,
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/telemetry", bytes.NewBuffer([]byte(tc.payload)))
@@ -171,7 +171,7 @@ func TestTelemetryHandler_POST_ValidData(t *testing.T) {
 		"type": "ICE",
 		"status": "active"
 	}`
-	
+
 	req := httptest.NewRequest(http.MethodPost, "/api/telemetry", bytes.NewBuffer([]byte(validPayload)))
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -183,13 +183,13 @@ func TestTelemetryHandler_POST_ValidData(t *testing.T) {
 func TestTelemetryHandler_POST_ReadBodyError(t *testing.T) {
 	// Test the case where reading the request body fails
 	handler := &TelemetryHandler{Collection: &mockTelemetryCollection{}}
-	
+
 	// Create a request with a body that will cause a read error
 	req := httptest.NewRequest(http.MethodPost, "/api/telemetry", &errorReader{})
 	w := httptest.NewRecorder()
-	
+
 	handler.ServeHTTP(w, req)
-	
+
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", w.Code)
 	}
@@ -198,7 +198,7 @@ func TestTelemetryHandler_POST_ReadBodyError(t *testing.T) {
 func TestTelemetryHandler_POST_WithFuelAndBatteryLevels(t *testing.T) {
 	// Test POST with both fuel and battery levels set
 	handler := &TelemetryHandler{Collection: &mockTelemetryCollection{}}
-	
+
 	payload := `{
 		"vehicle_id": "test-vehicle",
 		"timestamp": "2023-01-01T00:00:00Z",
@@ -210,55 +210,55 @@ func TestTelemetryHandler_POST_WithFuelAndBatteryLevels(t *testing.T) {
 		"type": "ICE",
 		"status": "active"
 	}`
-	
+
 	req := httptest.NewRequest(http.MethodPost, "/api/telemetry", bytes.NewBuffer([]byte(payload)))
 	w := httptest.NewRecorder()
-	
+
 	handler.ServeHTTP(w, req)
-	
+
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
 }
 
 func TestTelemetryHandler_GET_DBError(t *testing.T) {
-    handler := &TelemetryHandler{Collection: &mockTelemetryCollection{findErr: errors.New("db error")}}
-    req := httptest.NewRequest(http.MethodGet, "/api/telemetry", nil)
-    w := httptest.NewRecorder()
-    handler.ServeHTTP(w, req)
-    if w.Code != http.StatusInternalServerError {
-        t.Errorf("expected 500, got %d", w.Code)
-    }
+	handler := &TelemetryHandler{Collection: &mockTelemetryCollection{findErr: errors.New("db error")}}
+	req := httptest.NewRequest(http.MethodGet, "/api/telemetry", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
+	}
 }
 
 func TestTelemetryHandler_GET_TimeRange(t *testing.T) {
-    now := time.Now().UTC()
-    inRange := models.Telemetry{Timestamp: now}
-    outOfRange := models.Telemetry{Timestamp: now.Add(-48 * time.Hour)}
-    handler := &TelemetryHandler{Collection: &mockTelemetryCollection{results: []models.Telemetry{inRange, outOfRange}}}
-    from := now.Add(-1 * time.Hour).Format(time.RFC3339)
-    to := now.Add(1 * time.Hour).Format(time.RFC3339)
-    req := httptest.NewRequest(http.MethodGet, "/api/telemetry?from="+from+"&to="+to, nil)
-    w := httptest.NewRecorder()
-    handler.ServeHTTP(w, req)
-    if w.Code != http.StatusOK {
-        t.Errorf("expected 200, got %d", w.Code)
-    }
-    var res []models.Telemetry
-    json.NewDecoder(w.Body).Decode(&res)
-    if len(res) != 1 {
-        t.Errorf("expected 1 record in range, got %d", len(res))
-    }
+	now := time.Now().UTC()
+	inRange := models.Telemetry{Timestamp: now}
+	outOfRange := models.Telemetry{Timestamp: now.Add(-48 * time.Hour)}
+	handler := &TelemetryHandler{Collection: &mockTelemetryCollection{results: []models.Telemetry{inRange, outOfRange}}}
+	from := now.Add(-1 * time.Hour).Format(time.RFC3339)
+	to := now.Add(1 * time.Hour).Format(time.RFC3339)
+	req := httptest.NewRequest(http.MethodGet, "/api/telemetry?from="+from+"&to="+to, nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	var res []models.Telemetry
+	json.NewDecoder(w.Body).Decode(&res)
+	if len(res) != 1 {
+		t.Errorf("expected 1 record in range, got %d", len(res))
+	}
 }
 
 func TestTelemetryHandler_GET_TimeRange_InvalidParams(t *testing.T) {
-    handler := &TelemetryHandler{Collection: &mockTelemetryCollection{results: []models.Telemetry{}}}
-    req := httptest.NewRequest(http.MethodGet, "/api/telemetry?from=badtime", nil)
-    w := httptest.NewRecorder()
-    handler.ServeHTTP(w, req)
-    if w.Code != http.StatusBadRequest {
-        t.Errorf("expected 400 for invalid time param, got %d", w.Code)
-    }
+	handler := &TelemetryHandler{Collection: &mockTelemetryCollection{results: []models.Telemetry{}}}
+	req := httptest.NewRequest(http.MethodGet, "/api/telemetry?from=badtime", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid time param, got %d", w.Code)
+	}
 }
 
 func TestTelemetryHandler_GET_WithTimeRangeFilter(t *testing.T) {
@@ -270,17 +270,17 @@ func TestTelemetryHandler_GET_WithTimeRangeFilter(t *testing.T) {
 			{Timestamp: now.Add(-1 * time.Hour)},
 		},
 	}}
-	
+
 	// Test without time range first to ensure basic functionality works
 	req := httptest.NewRequest(http.MethodGet, "/api/telemetry", nil)
 	w := httptest.NewRecorder()
-	
+
 	handler.ServeHTTP(w, req)
-	
+
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
-	
+
 	var results []models.Telemetry
 	if err := json.NewDecoder(w.Body).Decode(&results); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
@@ -297,12 +297,12 @@ func TestTelemetryHandler_GET_WithOnlyFromTime(t *testing.T) {
 			{Timestamp: time.Now()},
 		},
 	}}
-	
+
 	req := httptest.NewRequest(http.MethodGet, "/api/telemetry?from=2023-01-01T00:00:00Z", nil)
 	w := httptest.NewRecorder()
-	
+
 	handler.ServeHTTP(w, req)
-	
+
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
@@ -315,12 +315,12 @@ func TestTelemetryHandler_GET_WithOnlyToTime(t *testing.T) {
 			{Timestamp: time.Now()},
 		},
 	}}
-	
+
 	req := httptest.NewRequest(http.MethodGet, "/api/telemetry?to=2023-12-31T23:59:59Z", nil)
 	w := httptest.NewRecorder()
-	
+
 	handler.ServeHTTP(w, req)
-	
+
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
@@ -331,12 +331,12 @@ func TestTelemetryHandler_GET_DatabaseError(t *testing.T) {
 	handler := &TelemetryHandler{Collection: &mockTelemetryCollection{
 		findErr: errors.New("database error"),
 	}}
-	
+
 	req := httptest.NewRequest(http.MethodGet, "/api/telemetry", nil)
 	w := httptest.NewRecorder()
-	
+
 	handler.ServeHTTP(w, req)
-	
+
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("expected 500, got %d", w.Code)
 	}
@@ -350,12 +350,12 @@ func TestTelemetryHandler_GET_CursorAllError(t *testing.T) {
 		},
 		allErr: errors.New("cursor error"),
 	}}
-	
+
 	req := httptest.NewRequest(http.MethodGet, "/api/telemetry", nil)
 	w := httptest.NewRecorder()
-	
+
 	handler.ServeHTTP(w, req)
-	
+
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("expected 500, got %d", w.Code)
 	}
@@ -368,14 +368,14 @@ func TestTelemetryHandler_GET_NoFilters(t *testing.T) {
 			{Timestamp: time.Now().Add(-1 * time.Hour)},
 		},
 	}}
-	
+
 	req := httptest.NewRequest(http.MethodGet, "/api/telemetry", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
-	
+
 	var results []models.Telemetry
 	if err := json.NewDecoder(w.Body).Decode(&results); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
@@ -387,7 +387,7 @@ func TestTelemetryHandler_GET_NoFilters(t *testing.T) {
 
 func TestTelemetryHandler_GET_InvalidTimeFormat(t *testing.T) {
 	handler := &TelemetryHandler{Collection: &mockTelemetryCollection{}}
-	
+
 	testCases := []struct {
 		name string
 		url  string
@@ -396,7 +396,7 @@ func TestTelemetryHandler_GET_InvalidTimeFormat(t *testing.T) {
 		{"invalid to time", "/api/telemetry?to=invalid-time"},
 		{"both invalid", "/api/telemetry?from=invalid&to=invalid"},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tc.url, nil)
@@ -411,7 +411,7 @@ func TestTelemetryHandler_GET_InvalidTimeFormat(t *testing.T) {
 
 func TestTelemetryHandler_MethodNotAllowed(t *testing.T) {
 	handler := &TelemetryHandler{Collection: &mockTelemetryCollection{}}
-	
+
 	testCases := []struct {
 		method string
 		url    string
@@ -420,7 +420,7 @@ func TestTelemetryHandler_MethodNotAllowed(t *testing.T) {
 		{http.MethodDelete, "/api/telemetry"},
 		{http.MethodPatch, "/api/telemetry"},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.method, func(t *testing.T) {
 			req := httptest.NewRequest(tc.method, tc.url, nil)
@@ -434,44 +434,44 @@ func TestTelemetryHandler_MethodNotAllowed(t *testing.T) {
 }
 
 func TestTelemetryMetricsHandler_Basic(t *testing.T) {
-    // Simulate 2 EV, 1 ICE, with various metrics
-    now := time.Now()
-    ev1 := models.Telemetry{Timestamp: now, BatteryLevel: floatPtr(80), Emissions: 10}
-    ev2 := models.Telemetry{Timestamp: now, BatteryLevel: floatPtr(60), Emissions: 12}
-    ice := models.Telemetry{Timestamp: now, FuelLevel: floatPtr(50), Emissions: 30}
-    mock := &mockTelemetryCollection{results: []models.Telemetry{ev1, ev2, ice}}
-    req := httptest.NewRequest(http.MethodGet, "/api/telemetry/metrics", nil)
-    w := httptest.NewRecorder()
-    metricsHandler := TelemetryMetricsHandler{Collection: mock}
-    metricsHandler.ServeHTTP(w, req)
-    if w.Code != http.StatusOK {
-        t.Errorf("expected 200, got %d", w.Code)
-    }
-    var res map[string]interface{}
-    json.NewDecoder(w.Body).Decode(&res)
-    if math.Abs(res["ev_percent"].(float64)-66.66666666666667) > 0.01 {
-        t.Errorf("expected ev_percent ~66.66, got %v", res["ev_percent"])
-    }
-    if res["total_emissions"] != 52.0 {
-        t.Errorf("expected total_emissions 52, got %v", res["total_emissions"])
-    }
+	// Simulate 2 EV, 1 ICE, with various metrics
+	now := time.Now()
+	ev1 := models.Telemetry{Timestamp: now, BatteryLevel: floatPtr(80), Emissions: 10}
+	ev2 := models.Telemetry{Timestamp: now, BatteryLevel: floatPtr(60), Emissions: 12}
+	ice := models.Telemetry{Timestamp: now, FuelLevel: floatPtr(50), Emissions: 30}
+	mock := &mockTelemetryCollection{results: []models.Telemetry{ev1, ev2, ice}}
+	req := httptest.NewRequest(http.MethodGet, "/api/telemetry/metrics", nil)
+	w := httptest.NewRecorder()
+	metricsHandler := TelemetryMetricsHandler{Collection: mock}
+	metricsHandler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	var res map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&res)
+	if math.Abs(res["ev_percent"].(float64)-66.66666666666667) > 0.01 {
+		t.Errorf("expected ev_percent ~66.66, got %v", res["ev_percent"])
+	}
+	if res["total_emissions"] != 52.0 {
+		t.Errorf("expected total_emissions 52, got %v", res["total_emissions"])
+	}
 }
 
 func TestTelemetryMetricsHandler_EmptyResults(t *testing.T) {
 	handler := TelemetryMetricsHandler{Collection: &mockTelemetryCollection{results: []models.Telemetry{}}}
-	
+
 	req := httptest.NewRequest(http.MethodGet, "/api/telemetry/metrics", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
-	
+
 	var result map[string]interface{}
 	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	
+
 	if result["total_emissions"] != 0.0 {
 		t.Errorf("expected total_emissions 0.0, got %v", result["total_emissions"])
 	}
@@ -487,27 +487,27 @@ func TestTelemetryMetricsHandler_MixedFleet(t *testing.T) {
 	now := time.Now()
 	fuelLevel := 50.0
 	batteryLevel := 80.0
-	
+
 	handler := TelemetryMetricsHandler{Collection: &mockTelemetryCollection{
 		results: []models.Telemetry{
-			{Timestamp: now, FuelLevel: &fuelLevel, Emissions: 30.0},      // ICE
+			{Timestamp: now, FuelLevel: &fuelLevel, Emissions: 30.0},       // ICE
 			{Timestamp: now, BatteryLevel: &batteryLevel, Emissions: 10.0}, // EV
-			{Timestamp: now, FuelLevel: &fuelLevel, Emissions: 25.0},      // ICE
+			{Timestamp: now, FuelLevel: &fuelLevel, Emissions: 25.0},       // ICE
 		},
 	}}
-	
+
 	req := httptest.NewRequest(http.MethodGet, "/api/telemetry/metrics", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
-	
+
 	var result map[string]interface{}
 	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	
+
 	if result["total_emissions"] != 65.0 {
 		t.Errorf("expected total_emissions 65.0, got %v", result["total_emissions"])
 	}
@@ -528,16 +528,16 @@ func TestVehiclesHandler_GET(t *testing.T) {
 		handler := &VehicleCollectionHandler{Collection: mockCollection}
 		handler.ServeHTTP(w, req)
 	}()
-	
+
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
-	
+
 	contentType := w.Header().Get("Content-Type")
 	if contentType != "application/json" {
 		t.Errorf("expected Content-Type application/json, got %s", contentType)
 	}
-	
+
 	body := w.Body.String()
 	if strings.TrimSpace(body) != "[]" {
 		t.Errorf("expected empty array, got %s", body)
@@ -546,17 +546,17 @@ func TestVehiclesHandler_GET(t *testing.T) {
 
 func TestVehiclesHandler_MethodNotAllowed(t *testing.T) {
 	testCases := []string{http.MethodPut, http.MethodDelete, http.MethodPatch}
-	
+
 	for _, method := range testCases {
 		t.Run(method, func(t *testing.T) {
 			req := httptest.NewRequest(method, "/api/vehicles", nil)
 			w := httptest.NewRecorder()
 			func() {
-		mockCollection := &mockVehicleCollection{results: []models.Vehicle{}}
-		handler := &VehicleCollectionHandler{Collection: mockCollection}
-		handler.ServeHTTP(w, req)
-	}()
-			
+				mockCollection := &mockVehicleCollection{results: []models.Vehicle{}}
+				handler := &VehicleCollectionHandler{Collection: mockCollection}
+				handler.ServeHTTP(w, req)
+			}()
+
 			if w.Code != http.StatusMethodNotAllowed {
 				t.Errorf("expected 405, got %d", w.Code)
 			}
@@ -589,7 +589,7 @@ func TestJWTAuthMiddleware_ValidToken(t *testing.T) {
 			next.ServeHTTP(w, r)
 		})
 	}
-	
+
 	// Create a valid JWT token
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"user_id": "test-user",
@@ -599,24 +599,24 @@ func TestJWTAuthMiddleware_ValidToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create token: %v", err)
 	}
-	
+
 	// Create a test handler
 	handlerCalled := false
 	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handlerCalled = true
 		w.WriteHeader(http.StatusOK)
 	})
-	
+
 	// Wrap with test JWT middleware
 	wrappedHandler := testJWTMiddleware(testHandler)
-	
+
 	// Create request with valid token
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.Header.Set("Authorization", "Bearer "+tokenString)
 	w := httptest.NewRecorder()
-	
+
 	wrappedHandler.ServeHTTP(w, req)
-	
+
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
@@ -646,21 +646,21 @@ func TestJWTAuthMiddleware_InvalidToken(t *testing.T) {
 			next.ServeHTTP(w, r)
 		})
 	}
-	
+
 	// Create a test handler
 	handlerCalled := false
 	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handlerCalled = true
 		w.WriteHeader(http.StatusOK)
 	})
-	
+
 	// Wrap with test JWT middleware
 	wrappedHandler := testJWTMiddleware(testHandler)
-	
+
 	// Test cases
 	testCases := []struct {
-		name        string
-		authHeader  string
+		name         string
+		authHeader   string
 		expectedCode int
 	}{
 		{"missing header", "", http.StatusUnauthorized},
@@ -668,7 +668,7 @@ func TestJWTAuthMiddleware_InvalidToken(t *testing.T) {
 		{"invalid token", "Bearer invalid-token", http.StatusUnauthorized},
 		{"expired token", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoidGVzdC11c2VyIiwiZXhwIjoxNjE2MjM5MDIyfQ.invalid", http.StatusUnauthorized},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			handlerCalled = false
@@ -677,9 +677,9 @@ func TestJWTAuthMiddleware_InvalidToken(t *testing.T) {
 				req.Header.Set("Authorization", tc.authHeader)
 			}
 			w := httptest.NewRecorder()
-			
+
 			wrappedHandler.ServeHTTP(w, req)
-			
+
 			if w.Code != tc.expectedCode {
 				t.Errorf("expected %d, got %d", tc.expectedCode, w.Code)
 			}
@@ -711,7 +711,7 @@ func TestJWTAuthMiddleware_ExpiredToken(t *testing.T) {
 			next.ServeHTTP(w, r)
 		})
 	}
-	
+
 	// Create an expired JWT token
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"user_id": "test-user",
@@ -721,24 +721,24 @@ func TestJWTAuthMiddleware_ExpiredToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create token: %v", err)
 	}
-	
+
 	// Create a test handler
 	handlerCalled := false
 	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handlerCalled = true
 		w.WriteHeader(http.StatusOK)
 	})
-	
+
 	// Wrap with test JWT middleware
 	wrappedHandler := testJWTMiddleware(testHandler)
-	
+
 	// Create request with expired token
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.Header.Set("Authorization", "Bearer "+tokenString)
 	w := httptest.NewRecorder()
-	
+
 	wrappedHandler.ServeHTTP(w, req)
-	
+
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", w.Code)
 	}
@@ -759,7 +759,7 @@ func TestMainFunction_EnvironmentVariables(t *testing.T) {
 		os.Setenv("TLS_CERT_FILE", originalCertFile)
 		os.Setenv("TLS_KEY_FILE", originalKeyFile)
 	}()
-	
+
 	// Test default port
 	os.Unsetenv("PORT")
 	port := os.Getenv("PORT")
@@ -769,23 +769,23 @@ func TestMainFunction_EnvironmentVariables(t *testing.T) {
 	if port != "8080" {
 		t.Errorf("expected default port 8080, got %s", port)
 	}
-	
+
 	// Test custom port
 	os.Setenv("PORT", "9090")
 	port = os.Getenv("PORT")
 	if port != "9090" {
 		t.Errorf("expected custom port 9090, got %s", port)
 	}
-	
+
 	// Test HTTPS configuration
 	os.Setenv("USE_HTTPS", "true")
 	os.Setenv("TLS_CERT_FILE", "/path/to/cert.pem")
 	os.Setenv("TLS_KEY_FILE", "/path/to/key.pem")
-	
+
 	useHTTPS := os.Getenv("USE_HTTPS")
 	certFile := os.Getenv("TLS_CERT_FILE")
 	keyFile := os.Getenv("TLS_KEY_FILE")
-	
+
 	if useHTTPS != "true" {
 		t.Errorf("expected USE_HTTPS true, got %s", useHTTPS)
 	}
@@ -802,11 +802,11 @@ func TestMainFunction_LoggingSetup(t *testing.T) {
 	// This is a basic test to ensure logging configuration works
 	log := logrus.New()
 	log.SetFormatter(&logrus.JSONFormatter{})
-	
+
 	// Test basic logging operations
 	log.WithField("test", "value").Info("test message")
 	log.WithError(errors.New("test error")).Error("test error message")
-	
+
 	// If we get here without panic, the test passes
 }
 
@@ -826,22 +826,22 @@ func TestTelemetryMetricsHandler_WithTimeRangeFilter(t *testing.T) {
 			{Timestamp: now.Add(-1 * time.Hour), Emissions: 30.0},
 		},
 	}}
-	
+
 	// Test without time range first to ensure basic functionality works
 	req := httptest.NewRequest(http.MethodGet, "/api/telemetry/metrics", nil)
 	w := httptest.NewRecorder()
-	
+
 	handler.ServeHTTP(w, req)
-	
+
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
-	
+
 	var result map[string]interface{}
 	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	
+
 	if result["total_emissions"] != 55.0 {
 		t.Errorf("expected total_emissions 55.0, got %v", result["total_emissions"])
 	}
@@ -855,13 +855,13 @@ func TestTelemetryMetricsHandler_WithOnlyFromTime(t *testing.T) {
 			{Timestamp: now, Emissions: 25.0},
 		},
 	}}
-	
+
 	// Test without time range first to ensure basic functionality works
 	req := httptest.NewRequest(http.MethodGet, "/api/telemetry/metrics", nil)
 	w := httptest.NewRecorder()
-	
+
 	handler.ServeHTTP(w, req)
-	
+
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
@@ -875,13 +875,13 @@ func TestTelemetryMetricsHandler_WithOnlyToTime(t *testing.T) {
 			{Timestamp: now, Emissions: 25.0},
 		},
 	}}
-	
+
 	// Test without time range first to ensure basic functionality works
 	req := httptest.NewRequest(http.MethodGet, "/api/telemetry/metrics", nil)
 	w := httptest.NewRecorder()
-	
+
 	handler.ServeHTTP(w, req)
-	
+
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
@@ -892,12 +892,12 @@ func TestTelemetryMetricsHandler_DatabaseError(t *testing.T) {
 	handler := TelemetryMetricsHandler{Collection: &mockTelemetryCollection{
 		findErr: errors.New("database error"),
 	}}
-	
+
 	req := httptest.NewRequest(http.MethodGet, "/api/telemetry/metrics", nil)
 	w := httptest.NewRecorder()
-	
+
 	handler.ServeHTTP(w, req)
-	
+
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("expected 500, got %d", w.Code)
 	}
@@ -911,12 +911,12 @@ func TestTelemetryMetricsHandler_CursorAllError(t *testing.T) {
 		},
 		allErr: errors.New("cursor error"),
 	}}
-	
+
 	req := httptest.NewRequest(http.MethodGet, "/api/telemetry/metrics", nil)
 	w := httptest.NewRecorder()
-	
+
 	handler.ServeHTTP(w, req)
-	
+
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("expected 500, got %d", w.Code)
 	}
@@ -926,30 +926,30 @@ func TestTelemetryMetricsHandler_WithMixedVehicleTypes(t *testing.T) {
 	// Test metrics with mixed ICE and EV vehicles
 	fuelLevel := 75.0
 	batteryLevel := 80.0
-	
+
 	handler := TelemetryMetricsHandler{Collection: &mockTelemetryCollection{
 		results: []models.Telemetry{
-			{Timestamp: time.Now(), FuelLevel: &fuelLevel, Emissions: 30.0},      // ICE
+			{Timestamp: time.Now(), FuelLevel: &fuelLevel, Emissions: 30.0},       // ICE
 			{Timestamp: time.Now(), BatteryLevel: &batteryLevel, Emissions: 10.0}, // EV
-			{Timestamp: time.Now(), FuelLevel: &fuelLevel, Emissions: 25.0},      // ICE
+			{Timestamp: time.Now(), FuelLevel: &fuelLevel, Emissions: 25.0},       // ICE
 			{Timestamp: time.Now(), BatteryLevel: &batteryLevel, Emissions: 15.0}, // EV
 		},
 	}}
-	
+
 	req := httptest.NewRequest(http.MethodGet, "/api/telemetry/metrics", nil)
 	w := httptest.NewRecorder()
-	
+
 	handler.ServeHTTP(w, req)
-	
+
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
-	
+
 	var result map[string]interface{}
 	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	
+
 	if result["total_emissions"] != 80.0 {
 		t.Errorf("expected total_emissions 80.0, got %v", result["total_emissions"])
 	}
@@ -965,28 +965,28 @@ func TestTelemetryMetricsHandler_WithMixedVehicleTypes(t *testing.T) {
 func TestTelemetryMetricsHandler_WithOnlyICEVehicles(t *testing.T) {
 	// Test metrics with only ICE vehicles
 	fuelLevel := 75.0
-	
+
 	handler := TelemetryMetricsHandler{Collection: &mockTelemetryCollection{
 		results: []models.Telemetry{
 			{Timestamp: time.Now(), FuelLevel: &fuelLevel, Emissions: 30.0}, // ICE
 			{Timestamp: time.Now(), FuelLevel: &fuelLevel, Emissions: 25.0}, // ICE
 		},
 	}}
-	
+
 	req := httptest.NewRequest(http.MethodGet, "/api/telemetry/metrics", nil)
 	w := httptest.NewRecorder()
-	
+
 	handler.ServeHTTP(w, req)
-	
+
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
-	
+
 	var result map[string]interface{}
 	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	
+
 	if result["total_emissions"] != 55.0 {
 		t.Errorf("expected total_emissions 55.0, got %v", result["total_emissions"])
 	}
@@ -1001,28 +1001,28 @@ func TestTelemetryMetricsHandler_WithOnlyICEVehicles(t *testing.T) {
 func TestTelemetryMetricsHandler_WithOnlyEVVehicles(t *testing.T) {
 	// Test metrics with only EV vehicles
 	batteryLevel := 80.0
-	
+
 	handler := TelemetryMetricsHandler{Collection: &mockTelemetryCollection{
 		results: []models.Telemetry{
 			{Timestamp: time.Now(), BatteryLevel: &batteryLevel, Emissions: 10.0}, // EV
 			{Timestamp: time.Now(), BatteryLevel: &batteryLevel, Emissions: 15.0}, // EV
 		},
 	}}
-	
+
 	req := httptest.NewRequest(http.MethodGet, "/api/telemetry/metrics", nil)
 	w := httptest.NewRecorder()
-	
+
 	handler.ServeHTTP(w, req)
-	
+
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
-	
+
 	var result map[string]interface{}
 	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	
+
 	if result["total_emissions"] != 25.0 {
 		t.Errorf("expected total_emissions 25.0, got %v", result["total_emissions"])
 	}
@@ -1068,10 +1068,10 @@ func TestVehicleHandler_GetVehicles(t *testing.T) {
 
 			rr := httptest.NewRecorder()
 			func() {
-			mockCollection := &mockVehicleCollection{results: []models.Vehicle{}}
-			handler := &VehicleCollectionHandler{Collection: mockCollection}
-			handler.ServeHTTP(rr, req)
-		}()
+				mockCollection := &mockVehicleCollection{results: []models.Vehicle{}}
+				handler := &VehicleCollectionHandler{Collection: mockCollection}
+				handler.ServeHTTP(rr, req)
+			}()
 
 			if status := rr.Code; status != tt.expectedStatus {
 				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
@@ -1166,10 +1166,10 @@ func TestVehicleHandler_PostVehicle(t *testing.T) {
 
 			rr := httptest.NewRecorder()
 			func() {
-			mockCollection := &mockVehicleCollection{results: []models.Vehicle{}}
-			handler := &VehicleCollectionHandler{Collection: mockCollection}
-			handler.ServeHTTP(rr, req)
-		}()
+				mockCollection := &mockVehicleCollection{results: []models.Vehicle{}}
+				handler := &VehicleCollectionHandler{Collection: mockCollection}
+				handler.ServeHTTP(rr, req)
+			}()
 
 			if status := rr.Code; status != tt.expectedStatus {
 				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
@@ -1177,10 +1177,10 @@ func TestVehicleHandler_PostVehicle(t *testing.T) {
 
 			if tt.expectedError {
 				body := rr.Body.String()
-				if !strings.Contains(body, "error") && 
-				   !strings.Contains(body, "Invalid") && 
-				   !strings.Contains(body, "required") && 
-				   !strings.Contains(body, "must be") {
+				if !strings.Contains(body, "error") &&
+					!strings.Contains(body, "Invalid") &&
+					!strings.Contains(body, "required") &&
+					!strings.Contains(body, "must be") {
 					t.Errorf("expected error response, got: %v", body)
 				}
 			} else {
@@ -1252,10 +1252,10 @@ func TestVehicleHandler_PutVehicle(t *testing.T) {
 
 			rr := httptest.NewRecorder()
 			func() {
-			mockCollection := &mockVehicleCollection{results: []models.Vehicle{}}
-			vehicleCollectionHandler = &VehicleCollectionHandler{Collection: mockCollection}
-			vehicleHandler(rr, req)
-		}()
+				mockCollection := &mockVehicleCollection{results: []models.Vehicle{}}
+				vehicleCollectionHandler = &VehicleCollectionHandler{Collection: mockCollection}
+				vehicleHandler(rr, req)
+			}()
 
 			if status := rr.Code; status != tt.expectedStatus {
 				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
@@ -1296,10 +1296,10 @@ func TestVehicleHandler_DeleteVehicle(t *testing.T) {
 
 			rr := httptest.NewRecorder()
 			func() {
-			mockCollection := &mockVehicleCollection{results: []models.Vehicle{}}
-			vehicleCollectionHandler = &VehicleCollectionHandler{Collection: mockCollection}
-			vehicleHandler(rr, req)
-		}()
+				mockCollection := &mockVehicleCollection{results: []models.Vehicle{}}
+				vehicleCollectionHandler = &VehicleCollectionHandler{Collection: mockCollection}
+				vehicleHandler(rr, req)
+			}()
 
 			if status := rr.Code; status != tt.expectedStatus {
 				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
@@ -1307,6 +1307,7 @@ func TestVehicleHandler_DeleteVehicle(t *testing.T) {
 		})
 	}
 }
+
 type mockVehicleCollection struct {
 	results []models.Vehicle
 	findErr error

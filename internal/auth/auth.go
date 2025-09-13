@@ -10,16 +10,16 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/crypto/bcrypt"
 	"github.com/ukydev/fleet-sustainability/internal/models"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
-	ErrInvalidToken     = errors.New("invalid token")
-	ErrExpiredToken     = errors.New("token expired")
+	ErrInvalidToken       = errors.New("invalid token")
+	ErrExpiredToken       = errors.New("token expired")
 	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrUserNotFound     = errors.New("user not found")
-	ErrUserInactive     = errors.New("user is inactive")
+	ErrUserNotFound       = errors.New("user not found")
+	ErrUserInactive       = errors.New("user is inactive")
 )
 
 // Service handles authentication operations
@@ -183,4 +183,4 @@ func (s *Service) ValidateUsername(username string) error {
 		return errors.New("username must be less than 50 characters")
 	}
 	return nil
-} 
+}

@@ -2,8 +2,8 @@ package db
 
 import (
 	"context"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"github.com/ukydev/fleet-sustainability/internal/models"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // TelemetryCollection defines the interface for telemetry data operations.
