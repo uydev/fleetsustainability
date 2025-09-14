@@ -61,8 +61,8 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Timestamp    string          `json:"timestamp"`
 			Location     models.Location `json:"location"`
 			Speed        float64         `json:"speed"`
-			FuelLevel    float64         `json:"fuel_level,omitempty"`
-			BatteryLevel float64         `json:"battery_level,omitempty"`
+			FuelLevel    *float64        `json:"fuel_level,omitempty"`
+			BatteryLevel *float64        `json:"battery_level,omitempty"`
 			Emissions    float64         `json:"emissions"`
 			Type         string          `json:"type"`
 			Status       string          `json:"status"`
@@ -96,18 +96,23 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "emissions must be non-negative", http.StatusBadRequest)
 			return
 		}
+		// Enforce EV emissions to zero server-side to prevent bad client data
+		if teleIn.Type == "EV" {
+			teleIn.Emissions = 0
+		}
 		// Optionally, add more checks for FuelLevel, BatteryLevel, Location, etc.
 		timestamp, err := time.Parse(time.RFC3339, teleIn.Timestamp)
 		if err != nil {
 			http.Error(w, "Invalid timestamp format", http.StatusBadRequest)
 			return
 		}
+		// Preserve explicit zeros by using pointers from input
 		var fuelPtr, batteryPtr *float64
-		if teleIn.FuelLevel != 0 {
-			fuelPtr = &teleIn.FuelLevel
+		if teleIn.FuelLevel != nil {
+			fuelPtr = teleIn.FuelLevel
 		}
-		if teleIn.BatteryLevel != 0 {
-			batteryPtr = &teleIn.BatteryLevel
+		if teleIn.BatteryLevel != nil {
+			batteryPtr = teleIn.BatteryLevel
 		}
 		// Map provided vehicle_id string to ObjectID if valid; otherwise generate a new one
 		var vehicleObjectID primitive.ObjectID
@@ -159,9 +164,10 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	case http.MethodGet:
-		// Support time range filtering
+		// Support time range and vehicle_id filtering
 		fromStr := r.URL.Query().Get("from")
 		toStr := r.URL.Query().Get("to")
+		veh := r.URL.Query().Get("vehicle_id")
 		var filter bson.M = bson.M{}
 		if fromStr != "" || toStr != "" {
 			filter["timestamp"] = bson.M{}
@@ -182,9 +188,35 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				filter["timestamp"].(bson.M)["$lte"] = to
 			}
 		}
+		if veh != "" {
+			if len(veh) == 24 {
+				if oid, err := primitive.ObjectIDFromHex(veh); err == nil {
+					filter["vehicle_id"] = oid
+				}
+			}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		opts := options.Find().SetSort(bson.D{{Key: "timestamp", Value: -1}}).SetLimit(100)
+		// Allow client to control sort and limit; when a time range is provided, do not cap by default
+		sortOrder := int32(-1)
+		if strings.ToLower(r.URL.Query().Get("sort")) == "asc" {
+			sortOrder = 1
+		}
+		var limit int64 = 100
+		if fromStr != "" || toStr != "" {
+			limit = 0 // no limit when a time window is specified
+		}
+		if l := r.URL.Query().Get("limit"); l != "" {
+			if l == "0" {
+				limit = 0
+			} else if n, err := strconv.ParseInt(l, 10, 64); err == nil && n >= 0 {
+				limit = n
+			}
+		}
+		opts := options.Find().SetSort(bson.D{{Key: "timestamp", Value: sortOrder}})
+		if limit > 0 {
+			opts = opts.SetLimit(limit)
+		}
 		cursor, err := h.Collection.Find(ctx, filter, opts)
 		if err != nil {
 			http.Error(w, "Failed to query telemetry", http.StatusInternalServerError)
@@ -195,6 +227,10 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := cursor.All(ctx, &results); err != nil {
 			http.Error(w, "Failed to decode telemetry", http.StatusInternalServerError)
 			return
+		}
+		// Ensure we return an empty array [] instead of null when there are no results
+		if results == nil {
+			results = make([]models.Telemetry, 0)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(results)
@@ -1190,6 +1226,85 @@ func main() {
 	maintenanceHandler := &MaintenanceHandler{Collection: maintenanceCollection}
 	costHandler := &CostHandler{Collection: costCollection}
 	telemetryMetricsHandler := TelemetryMetricsHandler{Collection: telemetryCollection}
+	alertsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Threshold-based alerts from telemetry with optional time filtering
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		fromStr := r.URL.Query().Get("from")
+		toStr := r.URL.Query().Get("to")
+		var ts bson.M
+		if fromStr != "" || toStr != "" {
+			ts = bson.M{}
+			if fromStr != "" { if from, err := time.Parse(time.RFC3339, fromStr); err == nil { ts["$gte"] = from } }
+			if toStr != "" { if to, err := time.Parse(time.RFC3339, toStr); err == nil { ts["$lte"] = to } }
+		} else {
+			ts = bson.M{"$gte": time.Now().Add(-1 * time.Hour)}
+		}
+		filter := bson.M{"timestamp": ts}
+		cursor, err := telemetryCollection.Find(ctx, filter)
+		if err != nil { http.Error(w, "Failed to query telemetry", http.StatusInternalServerError); return }
+		defer cursor.Close(ctx)
+		var rows []models.Telemetry
+		if err := cursor.All(ctx, &rows); err != nil { http.Error(w, "Failed to decode telemetry", http.StatusInternalServerError); return }
+		alerts := []map[string]interface{}{}
+		for _, t := range rows {
+			if t.FuelLevel != nil && *t.FuelLevel <= 10 { alerts = append(alerts, map[string]interface{}{"type":"low_fuel","vehicle_id":t.VehicleID.Hex(),"value":*t.FuelLevel,"ts":t.Timestamp}) }
+			if t.BatteryLevel != nil && *t.BatteryLevel <= 10 { alerts = append(alerts, map[string]interface{}{"type":"low_battery","vehicle_id":t.VehicleID.Hex(),"value":*t.BatteryLevel,"ts":t.Timestamp}) }
+			if t.Emissions >= 50 { alerts = append(alerts, map[string]interface{}{"type":"high_emissions","vehicle_id":t.VehicleID.Hex(),"value":t.Emissions,"ts":t.Timestamp}) }
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(alerts)
+	})
+
+	advancedMetricsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Naive aggregates: fuel used (delta), cost estimate, daily emissions trend
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		fromStr := r.URL.Query().Get("from")
+		var filter bson.M = bson.M{}
+		if fromStr != "" {
+			if from, err := time.Parse(time.RFC3339, fromStr); err == nil { filter["timestamp"] = bson.M{"$gte": from} }
+		}
+		cursor, err := telemetryCollection.Find(ctx, filter)
+		if err != nil { http.Error(w, "Failed to query telemetry", http.StatusInternalServerError); return }
+		defer cursor.Close(ctx)
+		var rows []models.Telemetry
+		if err := cursor.All(ctx, &rows); err != nil { http.Error(w, "Failed to decode telemetry", http.StatusInternalServerError); return }
+		// group by vehicle
+		type agg struct{ first, last *models.Telemetry }
+		m := map[string]*agg{}
+		for i := range rows {
+			v := rows[i]
+			id := v.VehicleID.Hex()
+			a := m[id]
+			if a == nil { a = &agg{}; m[id] = a }
+			if a.first == nil || v.Timestamp.Before(a.first.Timestamp) { a.first = &v }
+			if a.last == nil || v.Timestamp.After(a.last.Timestamp) { a.last = &v }
+		}
+		fuelUsed := 0.0; energyUsed := 0.0; emissions := 0.0
+		for _, a := range m {
+			if a.first != nil && a.last != nil {
+				emissions += a.last.Emissions // simplistic sum of last; could be integral
+				if a.first.FuelLevel != nil && a.last.FuelLevel != nil {
+					d := *a.first.FuelLevel - *a.last.FuelLevel
+					if d > 0 { fuelUsed += d }
+				}
+				if a.first.BatteryLevel != nil && a.last.BatteryLevel != nil {
+					d := *a.first.BatteryLevel - *a.last.BatteryLevel
+					if d > 0 { energyUsed += d }
+				}
+			}
+		}
+		// cost estimate
+		fuelCostPerPct := 0.02; energyCostPerPct := 0.005 // placeholder unit costs
+		cost := fuelUsed*fuelCostPerPct + energyUsed*energyCostPerPct
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"fuel_used_pct": fuelUsed,
+			"energy_used_pct": energyUsed,
+			"cost_estimate": cost,
+			"emissions": emissions,
+		})
+	})
 	authHandler := handlers.NewAuthHandler(authService, userCollection)
 
 	// Initialize middleware
@@ -1216,6 +1331,8 @@ func main() {
 	http.Handle("/api/maintenance", corsMiddleware(authMiddleware.Authenticate(maintenanceHandler)))
 	http.Handle("/api/costs", corsMiddleware(authMiddleware.Authenticate(costHandler)))
 	http.Handle("/api/telemetry/metrics", corsMiddleware(authMiddleware.Authenticate(telemetryMetricsHandler)))
+	http.Handle("/api/telemetry/metrics/advanced", corsMiddleware(authMiddleware.Authenticate(advancedMetricsHandler)))
+	http.Handle("/api/alerts", corsMiddleware(authMiddleware.Authenticate(alertsHandler)))
 
 	// User profile routes (require authentication)
 	http.HandleFunc("/api/auth/profile", func(w http.ResponseWriter, r *http.Request) {

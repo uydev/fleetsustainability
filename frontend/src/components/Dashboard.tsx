@@ -18,6 +18,9 @@ import {
 import { AccountCircle, Logout } from '@mui/icons-material';
 import WorldMap, { WorldMapRef } from './WorldMap';
 import MetricsPanel from './MetricsPanel';
+import VehicleDetail from './VehicleDetail';
+import AdvancedMetrics from './AdvancedMetrics';
+import Leaderboard from './Leaderboard';
 import VehicleList from './VehicleList';
 import TimeRangeSelector from './TimeRangeSelector';
 import FleetManagement from './FleetManagement';
@@ -65,6 +68,8 @@ const Dashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [tabValue, setTabValue] = useState(0);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [currentTimeRange, setCurrentTimeRange] = useState<{ from?: string; to?: string }>({});
+  const [alerts, setAlerts] = useState<Array<{type:string; vehicle_id:string; value:number; ts:string}>>([]);
   
   // Reference to the WorldMap component
   const worldMapRef = useRef<WorldMapRef>(null);
@@ -75,6 +80,24 @@ const Dashboard: React.FC = () => {
       worldMapRef.current.focusOnVehicle(vehicleId);
     }
   };
+
+  const handleTimeRangeChange = useCallback(async (timeRange: { from?: string; to?: string }) => {
+    setCurrentTimeRange(timeRange);
+    setLoading(true);
+    try {
+      const [telemetryData, metricsData] = await Promise.all([
+        apiService.getTelemetry(timeRange),
+        apiService.getFleetMetrics(timeRange),
+      ]);
+      setTelemetry(telemetryData);
+      setMetrics(metricsData);
+    } catch (err) {
+      console.error('Error loading filtered data:', err);
+      setError('Failed to load filtered data. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   const loadDashboardData = useCallback(async () => {
     setLoading(true);
@@ -100,25 +123,11 @@ const Dashboard: React.FC = () => {
     loadDashboardData();
   }, [loadDashboardData]);
 
-  const [currentTimeRange, setCurrentTimeRange] = useState<{ from?: string; to?: string }>({});
-
-  const handleTimeRangeChange = useCallback(async (timeRange: { from?: string; to?: string }) => {
-    setCurrentTimeRange(timeRange);
-    setLoading(true);
-    try {
-      const [telemetryData, metricsData] = await Promise.all([
-        apiService.getTelemetry(timeRange),
-        apiService.getFleetMetrics(timeRange),
-      ]);
-      setTelemetry(telemetryData);
-      setMetrics(metricsData);
-    } catch (err) {
-      console.error('Error loading filtered data:', err);
-      setError('Failed to load filtered data. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  useEffect(() => {
+    // Refresh alerts whenever time range changes
+    const tr = currentTimeRange;
+    apiService.getAlerts(tr && (tr.from || tr.to) ? tr : undefined).then(setAlerts).catch(() => setAlerts([]));
+  }, [currentTimeRange.from, currentTimeRange.to]);
 
   // Build a telemetry array aligned 1:1 with registered vehicles
   // Uses the latest telemetry per vehicle when available, otherwise falls back to the vehicle's current_location
@@ -250,6 +259,8 @@ const Dashboard: React.FC = () => {
           <Tab label="Trip Management" />
           <Tab label="Maintenance" />
           <Tab label="Cost Management" />
+          <Tab label="Alerts" />
+          <Tab label="Vehicle Detail" />
         </Tabs>
       </Box>
 
@@ -266,11 +277,17 @@ const Dashboard: React.FC = () => {
             <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               <Box sx={{ flex: 1, overflow: 'auto' }}>
                 <MetricsPanel metrics={metrics} />
+                <Box mt={2}>
+                  <AdvancedMetrics timeRange={currentTimeRange} />
+                </Box>
               </Box>
             </Paper>
           </Grid>
           <Grid item xs={12}>
             <VehicleList telemetry={overviewTelemetry} onVehicleFocus={handleVehicleFocus} />
+          </Grid>
+          <Grid item xs={12}>
+            <Leaderboard latest={overviewTelemetry} />
           </Grid>
         </Grid>
       </TabPanel>
@@ -297,6 +314,30 @@ const Dashboard: React.FC = () => {
 
       <TabPanel value={tabValue} index={6}>
         <CostManagement timeRange={currentTimeRange} />
+      </TabPanel>
+
+      <TabPanel value={tabValue} index={7}>
+        <Paper sx={{ p:2 }}>
+          <Typography variant="h6" gutterBottom>
+            Alerts {currentTimeRange.from || currentTimeRange.to ? '(filtered)' : '(last hour)'}
+          </Typography>
+          {alerts.length === 0 ? (
+            <Typography color="text.secondary">No alerts.</Typography>
+          ) : (
+            <Box display="flex" flexDirection="column" gap={1}>
+              {alerts.map((a, i) => (
+                <Box key={i} display="flex" justifyContent="space-between">
+                  <Typography variant="body2">{a.type.replace('_',' ')} – Vehicle {a.vehicle_id}</Typography>
+                  <Typography variant="body2">{new Date(a.ts).toLocaleString()}</Typography>
+                </Box>
+              ))}
+            </Box>
+          )}
+        </Paper>
+      </TabPanel>
+
+      <TabPanel value={tabValue} index={8}>
+        <VehicleDetail vehicles={vehicles} timeRange={currentTimeRange} />
       </TabPanel>
     </Container>
     </>

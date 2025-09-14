@@ -197,13 +197,20 @@ type VehicleRoute struct {
 
 // VehicleState holds per-vehicle dynamic state for the simulator.
 type VehicleState struct {
-	VehicleID  string
-	Type       string
-	Position   Location
-	SpeedKmh   float64
-	FuelPct    float64
-	BatteryPct float64
-	Route      *VehicleRoute
+	VehicleID      string
+	Type           string
+	Position       Location
+	SpeedKmh       float64
+	TargetSpeedKmh float64
+	FuelPct        float64
+	BatteryPct     float64
+	Route          *VehicleRoute
+	StopUntil      time.Time
+	RefuelActive   bool
+	// consumption model parameters (percent per km)
+	ConsumePctPerKm float64
+	// charging/refuel rate while stopped (percent per second)
+	RefillPctPerSec float64
 }
 
 func haversineKm(a, b Location) float64 {
@@ -318,7 +325,11 @@ func stepAlongRoute(s *VehicleState, tickSec float64) {
 func telemetryFromState(s *VehicleState) Telemetry {
 	em := 0.0
 	if s.Type == "ICE" {
-		em = 120 + 0.3*s.SpeedKmh
+		if s.SpeedKmh < 1 {
+			em = 0
+		} else {
+			em = 120 + 0.3*s.SpeedKmh
+		}
 	}
 	t := Telemetry{
 		VehicleID: s.VehicleID,
@@ -359,29 +370,67 @@ func simulateVehicle(apiURL string, s *VehicleState, interval time.Duration) {
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	for range tick.C {
-		// small speed noise
-		s.SpeedKmh += (rand.Float64()*2 - 1) * 1.5
-		if s.SpeedKmh < 15 {
-			s.SpeedKmh = 15
+		// Random stops and target speed logic
+		if time.Now().After(s.StopUntil) && rand.Float64() < 0.02 {
+			s.StopUntil = time.Now().Add(time.Duration(10+rand.Intn(35)) * time.Second)
+			s.TargetSpeedKmh = 0
 		}
-		if s.SpeedKmh > 90 {
-			s.SpeedKmh = 90
+		if time.Now().After(s.StopUntil) && s.TargetSpeedKmh == 0 {
+			s.TargetSpeedKmh = 30 + rand.Float64()*40
 		}
+		s.TargetSpeedKmh += (rand.Float64()*2 - 1) * 1.0
+		if s.TargetSpeedKmh < 0 { s.TargetSpeedKmh = 0 }
+		if s.TargetSpeedKmh > 90 { s.TargetSpeedKmh = 90 }
+
+		// Accelerate/decelerate towards target with rate limit
+		accelKmhPerSec := 8.0
+		maxDelta := accelKmhPerSec * interval.Seconds()
+		delta := s.TargetSpeedKmh - s.SpeedKmh
+		if delta > maxDelta {
+			s.SpeedKmh += maxDelta
+		} else if delta < -maxDelta {
+			s.SpeedKmh -= maxDelta
+		} else {
+			s.SpeedKmh = s.TargetSpeedKmh
+		}
+		if s.SpeedKmh < 0 { s.SpeedKmh = 0 }
 
 		stepAlongRoute(s, interval.Seconds())
 
-		// consume energy
+		// correlated consumption/refill
 		km := s.SpeedKmh * (interval.Seconds() / 3600.0)
 		if s.Type == "ICE" {
-			s.FuelPct -= km * 0.4
-			if s.FuelPct < 5 {
-				s.FuelPct = 100
+			// consume by distance traveled
+			s.FuelPct -= km * s.ConsumePctPerKm
+			// refuel only when stopped and low, randomly
+			if s.SpeedKmh < 0.5 {
+				if s.RefuelActive || (rand.Float64() < 0.03 && s.FuelPct < 30) {
+					s.RefuelActive = true
+					s.FuelPct += s.RefillPctPerSec * interval.Seconds()
+					if s.FuelPct >= 70+rand.Float64()*25 { // stop 70-95
+						s.RefuelActive = false
+					}
+				}
+			} else {
+				s.RefuelActive = false
 			}
+			if s.FuelPct < 0 { s.FuelPct = 0 }
+			if s.FuelPct > 100 { s.FuelPct = 100 }
 		} else {
-			s.BatteryPct -= km * 0.8
-			if s.BatteryPct < 5 {
-				s.BatteryPct = 100
+			s.BatteryPct -= km * s.ConsumePctPerKm
+			if s.SpeedKmh < 0.5 {
+				if s.RefuelActive || (rand.Float64() < 0.04 && s.BatteryPct < 25) {
+					s.RefuelActive = true
+					s.BatteryPct += s.RefillPctPerSec * interval.Seconds()
+					if s.BatteryPct >= 80+rand.Float64()*20 { // stop 80-100
+						s.RefuelActive = false
+					}
+				}
+			} else {
+				s.RefuelActive = false
 			}
+			if s.BatteryPct < 0 { s.BatteryPct = 0 }
+			if s.BatteryPct > 100 { s.BatteryPct = 100 }
 		}
 
 		sendTelemetry(apiURL, telemetryFromState(s))
@@ -431,9 +480,12 @@ func main() {
 			VehicleID:  vehicleID,
 			Type:       vtype,
 			Position:   start,
-			SpeedKmh:   30 + rand.Float64()*30,
+			SpeedKmh:   0,
+			TargetSpeedKmh: 30 + rand.Float64()*30,
 			FuelPct:    50 + rand.Float64()*50,
 			BatteryPct: 50 + rand.Float64()*50,
+			ConsumePctPerKm: func() float64 { if vtype=="ICE" { return 0.08 + rand.Float64()*0.05 } ; return 0.12 + rand.Float64()*0.06 }(),
+			RefillPctPerSec: func() float64 { if vtype=="ICE" { return 0.25 + rand.Float64()*0.20 } ; return 0.40 + rand.Float64()*0.30 }(),
 		}
 		states = append(states, state)
 	}
