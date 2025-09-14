@@ -1,0 +1,11 @@
+time="2025-09-13T18:45:26+01:00" level=info msg="Starting fleet simulation" api_url="http://localhost:8081/api" fleet_size=2 interval=1s
+time="2025-09-13T18:45:26+01:00" level=error msg="Failed to create vehicle" error="vehicle creation failed with status: 401"
+time="2025-09-13T18:45:26+01:00" level=error msg="Failed to create vehicle" error="vehicle creation failed with status: 401"
+time="2025-09-13T18:45:26+01:00" level=info msg="Vehicle creation completed" created_vehicles=0
+time="2025-09-13T18:45:26+01:00" level=info msg="Telemetry simulation started"
+fatal error: all goroutines are asleep - deadlock!
+
+goroutine 1 [select (no cases)]:
+main.main()
+	/Users/yilmazu/Projects/hephaestus-sytems/Fleet-Sustainability/cmd/simulator/main.go:398 +0x84a
+exit status 2

@@ -1,7 +1,10 @@
 import React from 'react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
+import { CircularProgress, Box } from '@mui/material';
 import Dashboard from './components/Dashboard';
+import Login from './components/Login';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 const theme = createTheme({
   palette: {
@@ -42,11 +45,54 @@ const theme = createTheme({
   },
 });
 
+const LoginWrapper: React.FC = () => {
+  const { login } = useAuth();
+
+  const handleLoginSuccess = async (username: string, password: string) => {
+    try {
+      await login(username, password);
+    } catch (error) {
+      console.error('Login failed:', error);
+    }
+  };
+
+  return <Login onLoginSuccess={handleLoginSuccess} />;
+};
+
+const AppContent: React.FC = () => {
+  const { isAuthenticated, loading } = useAuth();
+
+  console.log('Auth state:', { isAuthenticated, loading });
+
+  if (loading) {
+    return (
+      <Box
+        display="flex"
+        justifyContent="center"
+        alignItems="center"
+        minHeight="100vh"
+      >
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (!isAuthenticated) {
+    console.log('Showing login page');
+    return <LoginWrapper />;
+  }
+
+  console.log('Showing dashboard');
+  return <Dashboard />;
+};
+
 function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Dashboard />
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
     </ThemeProvider>
   );
 }

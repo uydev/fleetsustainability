@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Box,
   Grid,
@@ -7,8 +7,16 @@ import {
   Container,
   Tabs,
   Tab,
+  AppBar,
+  Toolbar,
+  Button,
+  Avatar,
+  Menu,
+  MenuItem,
+  IconButton,
 } from '@mui/material';
-import FleetMap from './FleetMap';
+import { AccountCircle, Logout } from '@mui/icons-material';
+import WorldMap, { WorldMapRef } from './WorldMap';
 import MetricsPanel from './MetricsPanel';
 import VehicleList from './VehicleList';
 import TimeRangeSelector from './TimeRangeSelector';
@@ -17,7 +25,9 @@ import TelemetryManagement from './TelemetryManagement';
 import TripManagement from './TripManagement';
 import MaintenanceManagement from './MaintenanceManagement';
 import CostManagement from './CostManagement';
+import LiveView from './LiveView';
 import apiService from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 import { Telemetry, FleetMetrics, Vehicle } from '../types';
 
 interface TabPanelProps {
@@ -43,6 +53,7 @@ function TabPanel(props: TabPanelProps) {
 }
 
 const Dashboard: React.FC = () => {
+  const { user, logout } = useAuth();
   const [telemetry, setTelemetry] = useState<Telemetry[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [metrics, setMetrics] = useState<FleetMetrics>({
@@ -53,6 +64,17 @@ const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tabValue, setTabValue] = useState(0);
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  
+  // Reference to the WorldMap component
+  const worldMapRef = useRef<WorldMapRef>(null);
+
+  // Function to handle vehicle focus from vehicle list
+  const handleVehicleFocus = (vehicleId: string) => {
+    if (worldMapRef.current) {
+      worldMapRef.current.focusOnVehicle(vehicleId);
+    }
+  };
 
   const loadDashboardData = useCallback(async () => {
     setLoading(true);
@@ -98,8 +120,58 @@ const Dashboard: React.FC = () => {
     }
   }, []);
 
+  // Build a telemetry array aligned 1:1 with registered vehicles
+  // Uses the latest telemetry per vehicle when available, otherwise falls back to the vehicle's current_location
+  const overviewTelemetry = useMemo(() => {
+    // latest telemetry per vehicle_id
+    const latestMap = new Map<string, Telemetry>();
+    for (const t of telemetry) {
+      const key = t.vehicle_id;
+      const prev = latestMap.get(key);
+      if (!prev || (t.timestamp && prev.timestamp && t.timestamp > prev.timestamp)) {
+        latestMap.set(key, t);
+      } else if (!prev) {
+        latestMap.set(key, t);
+      }
+    }
+
+    const mapped: Telemetry[] = [];
+    for (const v of vehicles) {
+      const lt = latestMap.get(v.id);
+      if (lt) {
+        mapped.push(lt);
+        continue;
+      }
+      if (v.current_location && typeof v.current_location.lat === 'number' && typeof v.current_location.lon === 'number') {
+        mapped.push({
+          vehicle_id: v.id,
+          timestamp: new Date().toISOString(),
+          location: v.current_location,
+          speed: 0,
+          emissions: 0,
+          type: v.type,
+          status: v.status,
+        } as Telemetry);
+      }
+    }
+    return mapped;
+  }, [telemetry, vehicles]);
+
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
+  };
+
+  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleMenuClose = () => {
+    setAnchorEl(null);
+  };
+
+  const handleLogout = () => {
+    logout();
+    handleMenuClose();
   };
 
   if (loading && telemetry.length === 0) {
@@ -122,16 +194,57 @@ const Dashboard: React.FC = () => {
   const iceCount = telemetry?.filter(t => t.fuel_level !== undefined && t.fuel_level !== null).length || 0;
 
   return (
-    <Container maxWidth="xl" sx={{ py: 4 }}>
-      <Typography variant="h4" component="h1" gutterBottom>
-        Fleet Sustainability Dashboard
-      </Typography>
+    <>
+      <AppBar position="static">
+        <Toolbar>
+          <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+            Fleet Sustainability Dashboard
+          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="body2" color="inherit">
+              {user?.firstName} {user?.lastName} ({user?.role})
+            </Typography>
+            <IconButton
+              size="large"
+              aria-label="account of current user"
+              aria-controls="menu-appbar"
+              aria-haspopup="true"
+              onClick={handleMenuOpen}
+              color="inherit"
+            >
+              <AccountCircle />
+            </IconButton>
+            <Menu
+              id="menu-appbar"
+              anchorEl={anchorEl}
+              anchorOrigin={{
+                vertical: 'top',
+                horizontal: 'right',
+              }}
+              keepMounted
+              transformOrigin={{
+                vertical: 'top',
+                horizontal: 'right',
+              }}
+              open={Boolean(anchorEl)}
+              onClose={handleMenuClose}
+            >
+              <MenuItem onClick={handleLogout}>
+                <Logout sx={{ mr: 1 }} />
+                Logout
+              </MenuItem>
+            </Menu>
+          </Box>
+        </Toolbar>
+      </AppBar>
+      <Container maxWidth="xl" sx={{ py: 4 }}>
 
       <TimeRangeSelector onTimeRangeChange={handleTimeRangeChange} />
 
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
         <Tabs value={tabValue} onChange={handleTabChange} aria-label="dashboard tabs">
           <Tab label="Fleet Overview" />
+          <Tab label="Live View" />
           <Tab label="Fleet Management" />
           <Tab label="Telemetry Management" />
           <Tab label="Trip Management" />
@@ -145,7 +258,7 @@ const Dashboard: React.FC = () => {
           <Grid item xs={12} lg={8}>
             <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
               <Box sx={{ flex: 1, minHeight: 0 }}>
-                <FleetMap telemetry={telemetry} />
+                <WorldMap ref={worldMapRef} telemetry={overviewTelemetry} />
               </Box>
             </Paper>
           </Grid>
@@ -157,31 +270,36 @@ const Dashboard: React.FC = () => {
             </Paper>
           </Grid>
           <Grid item xs={12}>
-            <VehicleList telemetry={telemetry} />
+            <VehicleList telemetry={overviewTelemetry} onVehicleFocus={handleVehicleFocus} />
           </Grid>
         </Grid>
       </TabPanel>
 
       <TabPanel value={tabValue} index={1}>
-        <FleetManagement timeRange={currentTimeRange} />
+        <LiveView />
       </TabPanel>
 
       <TabPanel value={tabValue} index={2}>
-        <TelemetryManagement timeRange={currentTimeRange} />
+        <FleetManagement timeRange={currentTimeRange} />
       </TabPanel>
 
       <TabPanel value={tabValue} index={3}>
-        <TripManagement timeRange={currentTimeRange} />
+        <TelemetryManagement timeRange={currentTimeRange} />
       </TabPanel>
 
       <TabPanel value={tabValue} index={4}>
-        <MaintenanceManagement timeRange={currentTimeRange} />
+        <TripManagement timeRange={currentTimeRange} />
       </TabPanel>
 
       <TabPanel value={tabValue} index={5}>
+        <MaintenanceManagement timeRange={currentTimeRange} />
+      </TabPanel>
+
+      <TabPanel value={tabValue} index={6}>
         <CostManagement timeRange={currentTimeRange} />
       </TabPanel>
     </Container>
+    </>
   );
 };
 

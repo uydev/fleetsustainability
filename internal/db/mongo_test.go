@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/ukydev/fleet-sustainability/internal/models"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/bson"
 )
 
 func TestConnectMongo_BadURI(t *testing.T) {
@@ -60,14 +60,14 @@ func TestInsertTelemetry_ValidTelemetry(t *testing.T) {
 func TestMongoCollection_Find_NilCollection(t *testing.T) {
 	coll := &MongoCollection{Collection: nil}
 	ctx := context.Background()
-	
+
 	// This should panic due to nil collection, which is expected behavior
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("expected panic with nil collection")
 		}
 	}()
-	
+
 	cursor, err := coll.Find(ctx, map[string]interface{}{})
 	// This line should not be reached due to panic
 	if err == nil {
@@ -83,14 +83,14 @@ func TestMongoTelemetryCursor_All(t *testing.T) {
 	cursor := &mongoTelemetryCursor{
 		cursor: nil, // This will cause a panic, which is expected
 	}
-	
+
 	// This should panic due to nil cursor
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("expected panic with nil cursor")
 		}
 	}()
-	
+
 	var results []models.Telemetry
 	err := cursor.All(context.Background(), &results)
 	// This line should not be reached due to panic
@@ -104,14 +104,14 @@ func TestMongoTelemetryCursor_Close(t *testing.T) {
 	cursor := &mongoTelemetryCursor{
 		cursor: nil, // This will cause a panic, which is expected
 	}
-	
+
 	// This should panic due to nil cursor
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("expected panic with nil cursor")
 		}
 	}()
-	
+
 	err := cursor.Close(context.Background())
 	// This line should not be reached due to panic
 	if err == nil {
@@ -122,7 +122,7 @@ func TestMongoTelemetryCursor_Close(t *testing.T) {
 func TestConnectMongo_ContextTimeout(t *testing.T) {
 	// Test connection with a very short timeout
 	os.Setenv("MONGO_URI", "mongodb://bad:uri")
-	
+
 	// This should fail quickly due to bad URI
 	client, err := ConnectMongo()
 	if err == nil {
@@ -161,11 +161,11 @@ func TestConnectMongo_EnvironmentVariables(t *testing.T) {
 	// Test that environment variables are properly read
 	originalURI := os.Getenv("MONGO_URI")
 	defer os.Setenv("MONGO_URI", originalURI)
-	
+
 	// Test with custom URI
 	testURI := "mongodb://test:27017"
 	os.Setenv("MONGO_URI", testURI)
-	
+
 	// The function should use the environment variable
 	// We can't easily test the actual connection without a real MongoDB,
 	// but we can verify the environment variable is read
@@ -182,7 +182,7 @@ func TestConnectMongo_WithTimeout(t *testing.T) {
 	originalURI := os.Getenv("MONGO_URI")
 	defer os.Setenv("MONGO_URI", originalURI)
 	os.Setenv("MONGO_URI", "mongodb://bad:uri")
-	
+
 	// This should fail quickly due to bad URI
 	client, err := ConnectMongo()
 	if err == nil {
@@ -198,7 +198,7 @@ func TestConnectMongo_ValidURI(t *testing.T) {
 	originalURI := os.Getenv("MONGO_URI")
 	defer os.Setenv("MONGO_URI", originalURI)
 	os.Setenv("MONGO_URI", "mongodb://localhost:27017")
-	
+
 	// This might fail due to no MongoDB running, but we test the URI parsing
 	client, _ := ConnectMongo()
 	// We don't check for success since MongoDB might not be running
@@ -230,7 +230,7 @@ func TestInsertTelemetry_WithPointerFields(t *testing.T) {
 	// Test with pointer fields (FuelLevel, BatteryLevel)
 	fuelLevel := 75.0
 	batteryLevel := 80.0
-	
+
 	tele := models.Telemetry{
 		Timestamp:    time.Now(),
 		Location:     models.Location{Lat: 51.0, Lon: 0.0},
@@ -249,20 +249,20 @@ func TestInsertTelemetry_WithPointerFields(t *testing.T) {
 func TestMongoCollection_Find_WithOptions(t *testing.T) {
 	coll := &MongoCollection{Collection: nil}
 	ctx := context.Background()
-	
+
 	// This should panic due to nil collection, which is expected behavior
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("expected panic with nil collection")
 		}
 	}()
-	
+
 	// Test with find options
 	opts := []*options.FindOptions{
 		options.Find().SetLimit(10),
 		options.Find().SetSort(bson.D{{Key: "timestamp", Value: -1}}),
 	}
-	
+
 	cursor, err := coll.Find(ctx, map[string]interface{}{}, opts...)
 	// This line should not be reached due to panic
 	if err == nil {
@@ -276,14 +276,14 @@ func TestMongoCollection_Find_WithOptions(t *testing.T) {
 func TestMongoCollection_Find_WithComplexFilter(t *testing.T) {
 	coll := &MongoCollection{Collection: nil}
 	ctx := context.Background()
-	
+
 	// This should panic due to nil collection, which is expected behavior
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("expected panic with nil collection")
 		}
 	}()
-	
+
 	// Test with complex filter
 	complexFilter := map[string]interface{}{
 		"timestamp": map[string]interface{}{
@@ -297,7 +297,7 @@ func TestMongoCollection_Find_WithComplexFilter(t *testing.T) {
 			"$lt": 100,
 		},
 	}
-	
+
 	cursor, err := coll.Find(ctx, complexFilter)
 	// This line should not be reached due to panic
 	if err == nil {
@@ -321,20 +321,20 @@ func TestConnectMongo_EnvironmentVariableHandling(t *testing.T) {
 		{"with database", "mongodb://localhost:27017/test", true},
 		{"with auth", "mongodb://user:pass@localhost:27017", true},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			originalURI := os.Getenv("MONGO_URI")
 			defer os.Setenv("MONGO_URI", originalURI)
-			
+
 			if tc.uri != "" {
 				os.Setenv("MONGO_URI", tc.uri)
 			} else {
 				os.Unsetenv("MONGO_URI")
 			}
-			
+
 			client, err := ConnectMongo()
-			
+
 			if tc.expected {
 				// For valid URIs, we don't check for success since MongoDB might not be running
 				// but we ensure the function doesn't panic
@@ -362,14 +362,14 @@ func TestMongoTelemetryCursor_WithNilCursor(t *testing.T) {
 	cursor := &mongoTelemetryCursor{
 		cursor: nil,
 	}
-	
+
 	// Test All method
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("expected panic with nil cursor")
 		}
 	}()
-	
+
 	var results []models.Telemetry
 	err := cursor.All(context.Background(), &results)
 	// This line should not be reached due to panic
@@ -383,14 +383,14 @@ func TestMongoTelemetryCursor_WithNilCursorClose(t *testing.T) {
 	cursor := &mongoTelemetryCursor{
 		cursor: nil,
 	}
-	
+
 	// This should panic due to nil cursor
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("expected panic with nil cursor")
 		}
 	}()
-	
+
 	err := cursor.Close(context.Background())
 	// This line should not be reached due to panic
 	if err == nil {

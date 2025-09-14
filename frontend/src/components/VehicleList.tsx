@@ -26,13 +26,15 @@ import { Telemetry } from '../types';
 
 interface VehicleListProps {
   telemetry: Telemetry[];
+  onVehicleFocus?: (vehicleId: string) => void;
 }
 
 interface VehicleRowProps {
   vehicle: Telemetry;
+  onVehicleFocus?: (vehicleId: string) => void;
 }
 
-const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle }) => {
+const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle, onVehicleFocus }) => {
   const [expanded, setExpanded] = useState(false);
 
   const getVehicleType = (vehicle: Telemetry): 'ICE' | 'EV' => {
@@ -69,11 +71,23 @@ const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle }) => {
 
   return (
     <>
-      <TableRow hover>
+      <TableRow 
+        hover 
+        onClick={() => {
+          setExpanded(!expanded);
+          if (onVehicleFocus) {
+            onVehicleFocus(vehicle.vehicle_id);
+          }
+        }}
+        sx={{ cursor: 'pointer' }}
+      >
         <TableCell>
           <IconButton
             size="small"
-            onClick={() => setExpanded(!expanded)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded(!expanded);
+            }}
           >
             {expanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
           </IconButton>
@@ -102,12 +116,12 @@ const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle }) => {
         </TableCell>
         <TableCell>
           <Typography variant="body2">
-            {vehicle.speed.toFixed(0)} km/h
+            {(Math.round(vehicle.speed * 10) / 10).toFixed(1)} km/h
           </Typography>
         </TableCell>
         <TableCell>
           <Chip
-            label={`${vehicle.emissions.toFixed(1)} kg`}
+            label={`${(Math.round(vehicle.emissions * 10) / 10).toFixed(1)} kg`}
             size="small"
             color={getEmissionsColor(vehicle.emissions)}
           />
@@ -143,7 +157,7 @@ const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle }) => {
                       Fuel Level
                     </Typography>
                     <Typography variant="body2">
-                      {vehicle.fuel_level.toFixed(1)}%
+                      {Math.round(vehicle.fuel_level)}%
                     </Typography>
                   </Box>
                 )}
@@ -155,7 +169,7 @@ const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle }) => {
                       Battery Level
                     </Typography>
                     <Typography variant="body2">
-                      {vehicle.battery_level.toFixed(1)}%
+                      {Math.round(vehicle.battery_level)}%
                     </Typography>
                   </Box>
                 )}
@@ -165,7 +179,7 @@ const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle }) => {
                     Emissions Efficiency
                   </Typography>
                   <Typography variant="body2">
-                    {(vehicle.emissions / vehicle.speed * 100).toFixed(2)} kg/100km
+                    {Number.isFinite(vehicle.emissions / Math.max(vehicle.speed, 0.1)) ? ((Math.round(((vehicle.emissions / Math.max(vehicle.speed, 0.1)) * 100) * 10) / 10).toFixed(1)) : '0.0'} kg/100km
                   </Typography>
                 </Box>
               </Box>
@@ -177,7 +191,7 @@ const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle }) => {
   );
 };
 
-const VehicleList: React.FC<VehicleListProps> = ({ telemetry }) => {
+const VehicleList: React.FC<VehicleListProps> = ({ telemetry, onVehicleFocus }) => {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
@@ -222,7 +236,7 @@ const VehicleList: React.FC<VehicleListProps> = ({ telemetry }) => {
           </TableHead>
           <TableBody>
             {paginatedTelemetry.map((vehicle, index) => (
-              <VehicleRow key={`${vehicle.vehicle_id}-${index}`} vehicle={vehicle} />
+              <VehicleRow key={`${vehicle.vehicle_id}-${index}`} vehicle={vehicle} onVehicleFocus={onVehicleFocus} />
             ))}
           </TableBody>
         </Table>

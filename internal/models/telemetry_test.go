@@ -27,7 +27,7 @@ func TestTelemetry_CompleteData(t *testing.T) {
 	now := time.Now()
 	fuelLevel := 75.0
 	batteryLevel := 80.0
-	
+
 	tele := Telemetry{
 		ID:           primitive.NewObjectID(),
 		VehicleID:    primitive.NewObjectID(),
@@ -38,20 +38,20 @@ func TestTelemetry_CompleteData(t *testing.T) {
 		BatteryLevel: &batteryLevel,
 		Emissions:    25.0,
 	}
-	
+
 	// Test JSON marshaling
 	data, err := json.Marshal(tele)
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
 	}
-	
+
 	// Test JSON unmarshaling
 	var unmarshaled Telemetry
 	err = json.Unmarshal(data, &unmarshaled)
 	if err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
-	
+
 	// Verify fields
 	if tele.ID != unmarshaled.ID {
 		t.Errorf("ID mismatch: expected %v, got %v", tele.ID, unmarshaled.ID)
@@ -78,19 +78,19 @@ func TestTelemetry_ICEVehicle(t *testing.T) {
 		FuelLevel: &fuelLevel,
 		Emissions: 25.0,
 	}
-	
+
 	// Test JSON marshaling
 	data, err := json.Marshal(tele)
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
 	}
-	
+
 	var unmarshaled Telemetry
 	err = json.Unmarshal(data, &unmarshaled)
 	if err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
-	
+
 	// ICE vehicle should have fuel level but no battery level
 	if unmarshaled.FuelLevel == nil {
 		t.Error("ICE vehicle should have fuel level")
@@ -111,19 +111,19 @@ func TestTelemetry_EVVehicle(t *testing.T) {
 		BatteryLevel: &batteryLevel,
 		Emissions:    10.0,
 	}
-	
+
 	// Test JSON marshaling
 	data, err := json.Marshal(tele)
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
 	}
-	
+
 	var unmarshaled Telemetry
 	err = json.Unmarshal(data, &unmarshaled)
 	if err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
-	
+
 	// EV vehicle should have battery level but no fuel level
 	if unmarshaled.BatteryLevel == nil {
 		t.Error("EV vehicle should have battery level")
@@ -140,19 +140,19 @@ func TestTelemetry_ZeroValues(t *testing.T) {
 		Speed:     0.0,
 		Emissions: 0.0,
 	}
-	
+
 	// Test JSON marshaling with zero values
 	data, err := json.Marshal(tele)
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
 	}
-	
+
 	var unmarshaled Telemetry
 	err = json.Unmarshal(data, &unmarshaled)
 	if err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
-	
+
 	// Verify zero values are preserved
 	if unmarshaled.Speed != 0.0 {
 		t.Errorf("Speed should be 0.0, got %f", unmarshaled.Speed)
@@ -164,7 +164,7 @@ func TestTelemetry_ZeroValues(t *testing.T) {
 
 func TestTelemetry_InvalidJSON(t *testing.T) {
 	invalidJSON := `{"invalid": "json", "missing": "required fields"}`
-	
+
 	var tele Telemetry
 	err := json.Unmarshal([]byte(invalidJSON), &tele)
 	// This should not panic, even with invalid JSON
@@ -175,18 +175,18 @@ func TestTelemetry_InvalidJSON(t *testing.T) {
 
 func TestLocation_MarshalUnmarshal(t *testing.T) {
 	loc := Location{Lat: 51.0, Lon: 0.0}
-	
+
 	data, err := json.Marshal(loc)
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
 	}
-	
+
 	var unmarshaled Location
 	err = json.Unmarshal(data, &unmarshaled)
 	if err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
-	
+
 	if unmarshaled.Lat != loc.Lat {
 		t.Errorf("Lat mismatch: expected %f, got %f", loc.Lat, unmarshaled.Lat)
 	}
@@ -197,24 +197,24 @@ func TestLocation_MarshalUnmarshal(t *testing.T) {
 
 func TestLocation_EdgeCases(t *testing.T) {
 	testCases := []Location{
-		{Lat: 90.0, Lon: 180.0},   // Max values
-		{Lat: -90.0, Lon: -180.0}, // Min values
-		{Lat: 0.0, Lon: 0.0},      // Zero values
+		{Lat: 90.0, Lon: 180.0},      // Max values
+		{Lat: -90.0, Lon: -180.0},    // Min values
+		{Lat: 0.0, Lon: 0.0},         // Zero values
 		{Lat: 51.5074, Lon: -0.1278}, // London coordinates
 	}
-	
+
 	for i, tc := range testCases {
 		data, err := json.Marshal(tc)
 		if err != nil {
 			t.Fatalf("marshal failed for case %d: %v", i, err)
 		}
-		
+
 		var unmarshaled Location
 		err = json.Unmarshal(data, &unmarshaled)
 		if err != nil {
 			t.Fatalf("unmarshal failed for case %d: %v", i, err)
 		}
-		
+
 		if unmarshaled.Lat != tc.Lat {
 			t.Errorf("case %d: Lat mismatch: expected %f, got %f", i, tc.Lat, unmarshaled.Lat)
 		}
@@ -247,7 +247,7 @@ func BenchmarkTelemetryUnmarshal(b *testing.B) {
 	if err != nil {
 		b.Fatalf("setup failed: %v", err)
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		var unmarshaled Telemetry

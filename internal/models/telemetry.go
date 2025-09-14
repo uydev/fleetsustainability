@@ -16,4 +16,6 @@ type Telemetry struct {
 	FuelLevel    *float64           `bson:"fuel_level,omitempty" json:"fuel_level,omitempty"`
 	BatteryLevel *float64           `bson:"battery_level,omitempty" json:"battery_level,omitempty"`
 	Emissions    float64            `bson:"emissions" json:"emissions"`
+	Type         string             `bson:"type" json:"type"`     // "ICE" or "EV"
+	Status       string             `bson:"status" json:"status"` // "active" or "inactive"
 }
