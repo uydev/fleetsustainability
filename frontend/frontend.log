@@ -67,3 +67,67 @@ src/components/VehicleDetail.tsx
 
 webpack compiled with 1 warning
 No issues found.
+Compiling...
+Compiled with warnings.
+
+[eslint] 
+src/components/VehicleDetail.tsx
+  Line 176:9:  'hasData' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+Search for the keywords to learn more about each warning.
+To ignore, add // eslint-disable-next-line to the line before.
+
+WARNING in [eslint] 
+src/components/VehicleDetail.tsx
+  Line 176:9:  'hasData' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+webpack compiled with 1 warning
+No issues found.
+Compiling...
+Compiled with warnings.
+
+[eslint] 
+src/components/VehicleDetail.tsx
+  Line 176:9:  'hasData' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+Search for the keywords to learn more about each warning.
+To ignore, add // eslint-disable-next-line to the line before.
+
+WARNING in [eslint] 
+src/components/VehicleDetail.tsx
+  Line 176:9:  'hasData' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+webpack compiled with 1 warning
+No issues found.
+Compiling...
+Compiled with warnings.
+
+[eslint] 
+src/components/VehicleDetail.tsx
+  Line 160:9:  'hasData' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+Search for the keywords to learn more about each warning.
+To ignore, add // eslint-disable-next-line to the line before.
+
+WARNING in [eslint] 
+src/components/VehicleDetail.tsx
+  Line 160:9:  'hasData' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+webpack compiled with 1 warning
+No issues found.
+Compiling...
+Compiled with warnings.
+
+[eslint] 
+src/components/VehicleDetail.tsx
+  Line 160:9:  'hasData' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+Search for the keywords to learn more about each warning.
+To ignore, add // eslint-disable-next-line to the line before.
+
+WARNING in [eslint] 
+src/components/VehicleDetail.tsx
+  Line 160:9:  'hasData' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+webpack compiled with 1 warning
+No issues found.

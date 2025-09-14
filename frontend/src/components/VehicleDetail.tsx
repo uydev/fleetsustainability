@@ -92,8 +92,8 @@ const VehicleDetail: React.FC<Props> = ({ vehicles, timeRange }) => {
         tsMs: ms,
         ts: new Date(ms).toLocaleTimeString(),
         speed: Number((Math.round(t.speed * 10) / 10).toFixed(1)),
-        fuel: t.fuel_level !== undefined ? Math.round(t.fuel_level) : undefined,
-        battery: t.battery_level !== undefined ? Math.round(t.battery_level) : undefined,
+        fuel: t.fuel_level !== undefined ? Number((Math.round(t.fuel_level * 10) / 10).toFixed(1)) : undefined,
+        battery: t.battery_level !== undefined ? Number((Math.round(t.battery_level * 10) / 10).toFixed(1)) : undefined,
         emissions: Number((Math.round(((selectedType === 'EV' ? 0 : t.emissions) * 10)) / 10).toFixed(1)),
       });
       prevSec = sec;
@@ -116,15 +116,14 @@ const VehicleDetail: React.FC<Props> = ({ vehicles, timeRange }) => {
       bucketMs = 3 * 60 * 60 * 1000; // >7d → 3h for more detail
     }
 
-    const aggMap = new Map<number, { tsMs: number; speedSum: number; speedCount: number; speedMin: number; fuel?: number | null; battery?: number | null; emissionsSum: number; emissionsCount: number }>();
+    const aggMap = new Map<number, { tsMs: number; speedSum: number; speedCount: number; speedMin: number; fuelSum: number; fuelCount: number; batterySum: number; batteryCount: number; emissionsSum: number; emissionsCount: number }>();
     for (const r of filtered) {
       const key = Math.floor(r.tsMs / bucketMs) * bucketMs;
-      const cur = aggMap.get(key) || { tsMs: key, speedSum: 0, speedCount: 0, speedMin: Number.POSITIVE_INFINITY, fuel: null, battery: null, emissionsSum: 0, emissionsCount: 0 };
+      const cur = aggMap.get(key) || { tsMs: key, speedSum: 0, speedCount: 0, speedMin: Number.POSITIVE_INFINITY, fuelSum: 0, fuelCount: 0, batterySum: 0, batteryCount: 0, emissionsSum: 0, emissionsCount: 0 };
       if (typeof r.speed === 'number') { cur.speedSum += r.speed; cur.speedCount += 1; if (r.speed < cur.speedMin) cur.speedMin = r.speed; }
       if (typeof r.emissions === 'number') { cur.emissionsSum += r.emissions; cur.emissionsCount += 1; }
-      // For % levels, keep last known in bucket
-      if (r.fuel !== undefined) cur.fuel = r.fuel;
-      if (r.battery !== undefined) cur.battery = r.battery;
+      if (typeof r.fuel === 'number') { cur.fuelSum += r.fuel; cur.fuelCount += 1; }
+      if (typeof r.battery === 'number') { cur.batterySum += r.battery; cur.batteryCount += 1; }
       aggMap.set(key, cur);
     }
 
@@ -133,27 +132,19 @@ const VehicleDetail: React.FC<Props> = ({ vehicles, timeRange }) => {
       ts: new Date(b.tsMs).toLocaleTimeString(),
       speed: b.speedCount ? Number((Math.round((b.speedSum / b.speedCount) * 10) / 10).toFixed(1)) : null,
       speedMin: (b.speedCount && b.speedMin !== Number.POSITIVE_INFINITY) ? Number(b.speedMin.toFixed(1)) : null,
-      fuel: b.fuel ?? undefined,
-      battery: b.battery ?? undefined,
+      fuel: b.fuelCount ? Number((Math.round((b.fuelSum / b.fuelCount) * 10) / 10).toFixed(1)) : undefined,
+      battery: b.batteryCount ? Number((Math.round((b.batterySum / b.batteryCount) * 10) / 10).toFixed(1)) : undefined,
       emissions: b.emissionsCount ? Number((Math.round(((b.emissionsSum / b.emissionsCount) * 10)) / 10).toFixed(1)) : null,
     }));
 
-    // Forward-fill fuel/battery to show a continuous level curve without gaps
+    // Forward-fill fuel/battery to show a continuous level curve without gaps (no backfill to avoid false flat lines)
     if (selectedType === 'EV') {
-      // forward-fill then backfill from first known level
       let last: number | undefined = undefined;
       aggregated = aggregated.map((r) => {
         const val = r.battery !== undefined ? r.battery : last;
         last = val as number | undefined;
         return { ...r, battery: val };
       });
-      let firstIdx = aggregated.findIndex(r => r.battery !== undefined && r.battery !== null);
-      if (firstIdx > 0) {
-        const seed = aggregated[firstIdx].battery as number;
-        for (let i = 0; i < firstIdx; i++) {
-          aggregated[i] = { ...aggregated[i], battery: seed };
-        }
-      }
     } else if (selectedType === 'ICE') {
       let last: number | undefined = undefined;
       aggregated = aggregated.map((r) => {
@@ -161,13 +152,6 @@ const VehicleDetail: React.FC<Props> = ({ vehicles, timeRange }) => {
         last = val as number | undefined;
         return { ...r, fuel: val };
       });
-      let firstIdx = aggregated.findIndex(r => r.fuel !== undefined && r.fuel !== null);
-      if (firstIdx > 0) {
-        const seed = aggregated[firstIdx].fuel as number;
-        for (let i = 0; i < firstIdx; i++) {
-          aggregated[i] = { ...aggregated[i], fuel: seed };
-        }
-      }
     }
 
     return aggregated;
