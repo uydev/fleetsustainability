@@ -152,11 +152,15 @@ const TelemetryManagement: React.FC<TelemetryManagementProps> = ({ timeRange }) 
                         'N/A'
                       )}
                     </TableCell>
-                    <TableCell>{entry.speed}</TableCell>
+                    <TableCell>{(Math.round(entry.speed * 10) / 10).toFixed(1)}</TableCell>
                     <TableCell>
-                      {entry.fuel_level !== undefined ? entry.fuel_level : entry.battery_level || 'N/A'}
+                      {entry.fuel_level !== undefined
+                        ? Math.round(entry.fuel_level)
+                        : entry.battery_level !== undefined
+                        ? Math.round(entry.battery_level)
+                        : 'N/A'}
                     </TableCell>
-                    <TableCell>{entry.emissions}</TableCell>
+                    <TableCell>{(Math.round(entry.emissions * 10) / 10).toFixed(1)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

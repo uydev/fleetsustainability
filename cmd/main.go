@@ -1153,6 +1153,26 @@ func main() {
 	costCollection := &db.MongoCollection{Collection: client.Database(mongoDBName).Collection("costs")}
 	userCollection := &db.MongoUserCollection{Collection: client.Database(mongoDBName).Collection("users")}
 
+	// Ensure TTL index on telemetry to prevent unbounded growth
+	ttlDays := 30
+	if v := os.Getenv("TELEMETRY_TTL_DAYS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			ttlDays = n
+		}
+	}
+	expireSeconds := int32(ttlDays * 24 * 60 * 60)
+	{
+		idxModel := mongo.IndexModel{
+			Keys:    bson.D{{Key: "timestamp", Value: 1}},
+			Options: options.Index().SetExpireAfterSeconds(expireSeconds).SetName("ttl_timestamp_seconds"),
+		}
+		if _, err := telemetryCollection.Collection.Indexes().CreateOne(context.Background(), idxModel); err != nil {
+			log.WithError(err).Warn("Failed to ensure TTL index on telemetry")
+		} else {
+			log.WithFields(log.Fields{"days": ttlDays}).Info("TTL index ensured on telemetry.timestamp")
+		}
+	}
+
 	// Initialize authentication services
 	authService, err := auth.NewService()
 	if err != nil {

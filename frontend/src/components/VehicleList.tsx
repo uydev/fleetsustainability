@@ -116,12 +116,12 @@ const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle, onVehicleFocus }) => {
         </TableCell>
         <TableCell>
           <Typography variant="body2">
-            {vehicle.speed.toFixed(0)} km/h
+            {(Math.round(vehicle.speed * 10) / 10).toFixed(1)} km/h
           </Typography>
         </TableCell>
         <TableCell>
           <Chip
-            label={`${vehicle.emissions.toFixed(1)} kg`}
+            label={`${(Math.round(vehicle.emissions * 10) / 10).toFixed(1)} kg`}
             size="small"
             color={getEmissionsColor(vehicle.emissions)}
           />
@@ -157,7 +157,7 @@ const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle, onVehicleFocus }) => {
                       Fuel Level
                     </Typography>
                     <Typography variant="body2">
-                      {vehicle.fuel_level.toFixed(1)}%
+                      {Math.round(vehicle.fuel_level)}%
                     </Typography>
                   </Box>
                 )}
@@ -169,7 +169,7 @@ const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle, onVehicleFocus }) => {
                       Battery Level
                     </Typography>
                     <Typography variant="body2">
-                      {vehicle.battery_level.toFixed(1)}%
+                      {Math.round(vehicle.battery_level)}%
                     </Typography>
                   </Box>
                 )}
@@ -179,7 +179,7 @@ const VehicleRow: React.FC<VehicleRowProps> = ({ vehicle, onVehicleFocus }) => {
                     Emissions Efficiency
                   </Typography>
                   <Typography variant="body2">
-                    {(vehicle.emissions / vehicle.speed * 100).toFixed(2)} kg/100km
+                    {Number.isFinite(vehicle.emissions / Math.max(vehicle.speed, 0.1)) ? ((Math.round(((vehicle.emissions / Math.max(vehicle.speed, 0.1)) * 100) * 10) / 10).toFixed(1)) : '0.0'} kg/100km
                   </Typography>
                 </Box>
               </Box>

@@ -76,9 +76,38 @@ func jitterLocation(base Location, meters float64) Location {
 	return Location{Lat: base.Lat + dLat, Lon: base.Lon + dLon}
 }
 
+func snapToRoad(p Location) Location {
+	url := fmt.Sprintf("https://router.project-osrm.org/nearest/v1/driving/%.6f,%.6f?number=1", p.Lon, p.Lat)
+	resp, err := http.Get(url)
+	if err != nil {
+		return p
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return p
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return p
+	}
+	var obj struct {
+		Waypoints []struct {
+			Location []float64 `json:"location"`
+		} `json:"waypoints"`
+	}
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return p
+	}
+	if len(obj.Waypoints) > 0 && len(obj.Waypoints[0].Location) >= 2 {
+		return Location{Lat: obj.Waypoints[0].Location[1], Lon: obj.Waypoints[0].Location[0]}
+	}
+	return p
+}
+
 func randomLocation() Location {
 	base := cities[rand.Intn(len(cities))]
-	return jitterLocation(base, 500) // start close to roads
+	j := jitterLocation(base, 500) // start close to roads
+	return snapToRoad(j)
 }
 
 var authToken string
@@ -226,20 +255,20 @@ func fetchOSRMRoute(start, end Location) ([]Location, error) {
 }
 
 func planNewRoute(s *VehicleState) {
-	start := s.Position
+	start := snapToRoad(s.Position)
 	// pick far city
 	var end Location
 	for i := 0; i < 10; i++ {
 		cand := cities[rand.Intn(len(cities))]
 		if haversineKm(start, cand) > 50 {
-			end = jitterLocation(cand, 500)
+			end = snapToRoad(jitterLocation(cand, 500))
 			break
 		}
 	}
 	pts, err := fetchOSRMRoute(start, end)
 	if err != nil {
-		// fallback small jitter loop
-		s.Route = &VehicleRoute{Points: []Location{start, jitterLocation(start, 2000)}, SegIndex: 0, SegOffset: 0}
+		// fallback small jitter loop (snap both ends)
+		s.Route = &VehicleRoute{Points: []Location{start, snapToRoad(jitterLocation(start, 2000))}, SegIndex: 0, SegOffset: 0}
 		return
 	}
 	s.Route = &VehicleRoute{Points: pts, SegIndex: 0, SegOffset: 0}
