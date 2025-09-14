@@ -131,3 +131,123 @@ src/components/VehicleDetail.tsx
 
 webpack compiled with 1 warning
 No issues found.
+Compiling...
+Compiled with warnings.
+
+[eslint] 
+src/components/Dashboard.tsx
+  Line 12:3:   'Button' is defined but never used                                                                                   @typescript-eslint/no-unused-vars
+  Line 13:3:   'Avatar' is defined but never used                                                                                   @typescript-eslint/no-unused-vars
+  Line 130:6:  React Hook useEffect has a missing dependency: 'currentTimeRange'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 202:9:  'evCount' is assigned a value but never used                                                                         @typescript-eslint/no-unused-vars
+  Line 203:9:  'iceCount' is assigned a value but never used                                                                        @typescript-eslint/no-unused-vars
+
+src/components/VehicleDetail.tsx
+  Line 160:9:  'hasData' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+Search for the keywords to learn more about each warning.
+To ignore, add // eslint-disable-next-line to the line before.
+
+WARNING in [eslint] 
+src/components/Dashboard.tsx
+  Line 12:3:   'Button' is defined but never used                                                                                   @typescript-eslint/no-unused-vars
+  Line 13:3:   'Avatar' is defined but never used                                                                                   @typescript-eslint/no-unused-vars
+  Line 130:6:  React Hook useEffect has a missing dependency: 'currentTimeRange'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 202:9:  'evCount' is assigned a value but never used                                                                         @typescript-eslint/no-unused-vars
+  Line 203:9:  'iceCount' is assigned a value but never used                                                                        @typescript-eslint/no-unused-vars
+
+src/components/VehicleDetail.tsx
+  Line 160:9:  'hasData' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+webpack compiled with 1 warning
+No issues found.
+Compiling...
+Compiled with warnings.
+
+[eslint] 
+src/components/Dashboard.tsx
+  Line 12:3:   'Button' is defined but never used                                                                                   @typescript-eslint/no-unused-vars
+  Line 13:3:   'Avatar' is defined but never used                                                                                   @typescript-eslint/no-unused-vars
+  Line 130:6:  React Hook useEffect has a missing dependency: 'currentTimeRange'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 202:9:  'evCount' is assigned a value but never used                                                                         @typescript-eslint/no-unused-vars
+  Line 203:9:  'iceCount' is assigned a value but never used                                                                        @typescript-eslint/no-unused-vars
+
+src/components/VehicleDetail.tsx
+  Line 160:9:  'hasData' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+Search for the keywords to learn more about each warning.
+To ignore, add // eslint-disable-next-line to the line before.
+
+WARNING in [eslint] 
+src/components/Dashboard.tsx
+  Line 12:3:   'Button' is defined but never used                                                                                   @typescript-eslint/no-unused-vars
+  Line 13:3:   'Avatar' is defined but never used                                                                                   @typescript-eslint/no-unused-vars
+  Line 130:6:  React Hook useEffect has a missing dependency: 'currentTimeRange'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 202:9:  'evCount' is assigned a value but never used                                                                         @typescript-eslint/no-unused-vars
+  Line 203:9:  'iceCount' is assigned a value but never used                                                                        @typescript-eslint/no-unused-vars
+
+src/components/VehicleDetail.tsx
+  Line 160:9:  'hasData' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+webpack compiled with 1 warning
+No issues found.
+Compiling...
+Compiled with warnings.
+
+[eslint] 
+src/components/Dashboard.tsx
+  Line 12:3:   'Button' is defined but never used                                                                                   @typescript-eslint/no-unused-vars
+  Line 13:3:   'Avatar' is defined but never used                                                                                   @typescript-eslint/no-unused-vars
+  Line 130:6:  React Hook useEffect has a missing dependency: 'currentTimeRange'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 202:9:  'evCount' is assigned a value but never used                                                                         @typescript-eslint/no-unused-vars
+  Line 203:9:  'iceCount' is assigned a value but never used                                                                        @typescript-eslint/no-unused-vars
+
+src/components/VehicleDetail.tsx
+  Line 160:9:  'hasData' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+Search for the keywords to learn more about each warning.
+To ignore, add // eslint-disable-next-line to the line before.
+
+WARNING in [eslint] 
+src/components/Dashboard.tsx
+  Line 12:3:   'Button' is defined but never used                                                                                   @typescript-eslint/no-unused-vars
+  Line 13:3:   'Avatar' is defined but never used                                                                                   @typescript-eslint/no-unused-vars
+  Line 130:6:  React Hook useEffect has a missing dependency: 'currentTimeRange'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 202:9:  'evCount' is assigned a value but never used                                                                         @typescript-eslint/no-unused-vars
+  Line 203:9:  'iceCount' is assigned a value but never used                                                                        @typescript-eslint/no-unused-vars
+
+src/components/VehicleDetail.tsx
+  Line 160:9:  'hasData' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+webpack compiled with 1 warning
+No issues found.
+Compiling...
+Compiled with warnings.
+
+[eslint] 
+src/components/Dashboard.tsx
+  Line 12:3:   'Button' is defined but never used                                                                                   @typescript-eslint/no-unused-vars
+  Line 13:3:   'Avatar' is defined but never used                                                                                   @typescript-eslint/no-unused-vars
+  Line 130:6:  React Hook useEffect has a missing dependency: 'currentTimeRange'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 202:9:  'evCount' is assigned a value but never used                                                                         @typescript-eslint/no-unused-vars
+  Line 203:9:  'iceCount' is assigned a value but never used                                                                        @typescript-eslint/no-unused-vars
+
+src/components/VehicleDetail.tsx
+  Line 160:9:  'hasData' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+Search for the keywords to learn more about each warning.
+To ignore, add // eslint-disable-next-line to the line before.
+
+WARNING in [eslint] 
+src/components/Dashboard.tsx
+  Line 12:3:   'Button' is defined but never used                                                                                   @typescript-eslint/no-unused-vars
+  Line 13:3:   'Avatar' is defined but never used                                                                                   @typescript-eslint/no-unused-vars
+  Line 130:6:  React Hook useEffect has a missing dependency: 'currentTimeRange'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 202:9:  'evCount' is assigned a value but never used                                                                         @typescript-eslint/no-unused-vars
+  Line 203:9:  'iceCount' is assigned a value but never used                                                                        @typescript-eslint/no-unused-vars
+
+src/components/VehicleDetail.tsx
+  Line 160:9:  'hasData' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+webpack compiled with 1 warning
+No issues found.

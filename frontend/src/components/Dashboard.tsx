@@ -254,13 +254,13 @@ const Dashboard: React.FC = () => {
         <Tabs value={tabValue} onChange={handleTabChange} aria-label="dashboard tabs">
           <Tab label="Fleet Overview" />
           <Tab label="Live View" />
+          <Tab label="Vehicle Detail" />
+          <Tab label="Alerts" />
           <Tab label="Fleet Management" />
           <Tab label="Telemetry Management" />
           <Tab label="Trip Management" />
-          <Tab label="Maintenance" />
           <Tab label="Cost Management" />
-          <Tab label="Alerts" />
-          <Tab label="Vehicle Detail" />
+          <Tab label="Maintenance" />
         </Tabs>
       </Box>
 
@@ -297,26 +297,10 @@ const Dashboard: React.FC = () => {
       </TabPanel>
 
       <TabPanel value={tabValue} index={2}>
-        <FleetManagement timeRange={currentTimeRange} />
+        <VehicleDetail vehicles={vehicles} timeRange={currentTimeRange} />
       </TabPanel>
 
       <TabPanel value={tabValue} index={3}>
-        <TelemetryManagement timeRange={currentTimeRange} />
-      </TabPanel>
-
-      <TabPanel value={tabValue} index={4}>
-        <TripManagement timeRange={currentTimeRange} />
-      </TabPanel>
-
-      <TabPanel value={tabValue} index={5}>
-        <MaintenanceManagement timeRange={currentTimeRange} />
-      </TabPanel>
-
-      <TabPanel value={tabValue} index={6}>
-        <CostManagement timeRange={currentTimeRange} />
-      </TabPanel>
-
-      <TabPanel value={tabValue} index={7}>
         <Paper sx={{ p:2 }}>
           <Typography variant="h6" gutterBottom>
             Alerts {currentTimeRange.from || currentTimeRange.to ? '(filtered)' : '(last hour)'}
@@ -336,8 +320,24 @@ const Dashboard: React.FC = () => {
         </Paper>
       </TabPanel>
 
+      <TabPanel value={tabValue} index={4}>
+        <FleetManagement timeRange={currentTimeRange} />
+      </TabPanel>
+
+      <TabPanel value={tabValue} index={5}>
+        <TelemetryManagement timeRange={currentTimeRange} />
+      </TabPanel>
+
+      <TabPanel value={tabValue} index={6}>
+        <TripManagement timeRange={currentTimeRange} />
+      </TabPanel>
+
+      <TabPanel value={tabValue} index={7}>
+        <CostManagement timeRange={currentTimeRange} />
+      </TabPanel>
+
       <TabPanel value={tabValue} index={8}>
-        <VehicleDetail vehicles={vehicles} timeRange={currentTimeRange} />
+        <MaintenanceManagement timeRange={currentTimeRange} />
       </TabPanel>
     </Container>
     </>
