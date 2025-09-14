@@ -246,7 +246,7 @@ func TestSimulateVehicle_WithTimeout(t *testing.T) {
 	defer server.Close()
 
 	// Create a context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
 	// Run simulateVehicle in a goroutine with context
@@ -271,7 +271,7 @@ func TestSimulateVehicle_WithTimeout(t *testing.T) {
 	select {
 	case <-done:
 		// Test completed successfully
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(150 * time.Millisecond):
 		t.Error("simulateVehicle did not respect timeout")
 	}
 }

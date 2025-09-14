@@ -9,9 +9,13 @@ import (
 type Role string
 
 const (
+	// RoleAdmin is an administrator with full permissions.
 	RoleAdmin    Role = "admin"
+	// RoleManager is a manager with broad operational permissions.
 	RoleManager  Role = "manager"
+	// RoleOperator is an operator with standard operational permissions.
 	RoleOperator Role = "operator"
+	// RoleViewer is a read-only viewer.
 	RoleViewer   Role = "viewer"
 )
 

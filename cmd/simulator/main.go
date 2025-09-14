@@ -107,7 +107,10 @@ func snapToRoad(p Location) Location {
 func randomLocation() Location {
 	base := cities[rand.Intn(len(cities))]
 	j := jitterLocation(base, 500) // start close to roads
-	return snapToRoad(j)
+	if os.Getenv("SIM_SNAP_TO_ROAD") == "1" {
+		return snapToRoad(j)
+	}
+	return j
 }
 
 var authToken string
@@ -185,12 +188,14 @@ func createVehicle(apiURL string, initialVehicleID string, vtype string) (string
 
 // --- Routing & movement ---
 
+// VehicleRoute describes a polyline route and current traversal state.
 type VehicleRoute struct {
 	Points    []Location
 	SegIndex  int
 	SegOffset float64 // km along current segment
 }
 
+// VehicleState holds per-vehicle dynamic state for the simulator.
 type VehicleState struct {
 	VehicleID  string
 	Type       string

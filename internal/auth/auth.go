@@ -15,10 +15,15 @@ import (
 )
 
 var (
+	// ErrInvalidToken indicates the JWT token is malformed or invalid.
 	ErrInvalidToken       = errors.New("invalid token")
+	// ErrExpiredToken indicates the JWT token has expired.
 	ErrExpiredToken       = errors.New("token expired")
+	// ErrInvalidCredentials indicates the provided login credentials are incorrect.
 	ErrInvalidCredentials = errors.New("invalid credentials")
+	// ErrUserNotFound indicates the requested user could not be found.
 	ErrUserNotFound       = errors.New("user not found")
+	// ErrUserInactive indicates the user account is inactive.
 	ErrUserInactive       = errors.New("user is inactive")
 )
 

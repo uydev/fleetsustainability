@@ -11,6 +11,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"strconv"
 
 	"github.com/joho/godotenv"
 	log "github.com/sirupsen/logrus"
@@ -19,6 +20,7 @@ import (
 	"github.com/ukydev/fleet-sustainability/internal/handlers"
 	"github.com/ukydev/fleet-sustainability/internal/middleware"
 	"github.com/ukydev/fleet-sustainability/internal/models"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -204,16 +206,18 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// --- Simple SSE Hub for broadcasting telemetry updates ---
+// SSEHub is a simple in-memory hub for broadcasting telemetry updates over SSE.
 type SSEHub struct {
 	mu      sync.RWMutex
 	clients map[chan []byte]struct{}
 }
 
+// NewSSEHub creates and returns a new SSEHub.
 func NewSSEHub() *SSEHub {
 	return &SSEHub{clients: make(map[chan []byte]struct{})}
 }
 
+// Broadcast sends the given data to all connected SSE clients.
 func (h *SSEHub) Broadcast(data []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()

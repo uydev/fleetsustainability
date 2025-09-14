@@ -14,6 +14,7 @@ import (
 // contextKey is a custom type for context keys to avoid collisions
 type contextKey string
 
+// UserContextKey is the request context key for authenticated user claims.
 const (
 	UserContextKey contextKey = "user"
 )
