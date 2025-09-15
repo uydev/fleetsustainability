@@ -227,6 +227,11 @@ start_fleet_sustainability() {
     print_status "2. Waiting for services to be ready..."
     sleep 10
 
+    # Optionally start local OSRM if requested
+    if [ "${RUN_LOCAL_OSRM:-0}" = "1" ]; then
+        start_local_osrm || print_warning "Local OSRM could not be started."
+    fi
+
     # Check if backend container is running
     print_status "3. Checking backend container..."
     if docker ps | grep -q "fleet-sustainability-app"; then
@@ -409,6 +414,10 @@ show_status() {
         print_warning "❌ Mongo Express: Not responding on port 8082"
     fi
 
+    # OSRM visibility
+    print_status "Routing (OSRM):"
+    osrm_status
+
     echo ""
 }
 
@@ -425,17 +434,21 @@ show_help() {
     echo "  restart       Restart the application (stop then start)"
     echo "  populate      Populate database with dummy data"
     echo "  clear         Clear database data (preserves users)"
+    echo "  sim-start     Start simulator (vehicles moving) [env: FLEET_SIZE, SIM_GLOBAL=1]"
+    echo "  sim-stop      Stop simulator"
+    echo "  sim-status    Show simulator status"
+    echo "  auto-fix      Auto-fix: reset DB, seed, and start movement"
+    echo "  osrm-start    Start local OSRM (Monaco dataset) on http://localhost:5000"
+    echo "  osrm-stop     Stop local OSRM"
+    echo "  osrm-status   Check OSRM reachability (and local container state)"
     echo "  troubleshoot  Open troubleshooting menu"
     echo "  help          Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0 start         # Start the application"
-    echo "  $0 stop          # Stop the application"
-    echo "  $0 status        # Check service status"
-    echo "  $0 restart       # Restart the application"
-    echo "  $0 populate      # Add dummy data to database"
-    echo "  $0 clear         # Clear database data (preserves users)"
-    echo "  $0 troubleshoot  # Open troubleshooting menu"
+    echo "  RUN_LOCAL_OSRM=1 $0 start   # start app and local OSRM"
+    echo "  $0 sim-start                 # local cities (uses OSRM_BASE_URL if set)"
+    echo "  $0 sim-start global          # force global spawn + public OSRM"
+    echo "  OSRM_BASE_URL=https://router.project-osrm.org SIM_GLOBAL=1 $0 sim-start"
     echo ""
 }
 
@@ -500,22 +513,57 @@ clear_database() {
     
     print_status "   Authentication successful"
 
-    # Clear vehicles using bulk delete endpoint
+    # Global city centers used for seeding locations (subset to keep runtime reasonable)
+    CITIES=(
+        "35.6895:139.6917"   # Tokyo
+        "28.6139:77.2090"    # Delhi
+        "31.2304:121.4737"   # Shanghai
+        "40.7128:-74.0060"   # New York
+        "-23.5505:-46.6333"  # São Paulo
+    )
+
+    # Clear vehicles by listing and deleting individually (bulk delete not supported)
     print_status "6. Clearing vehicles..."
-    VEHICLES_RESPONSE=$(curl -s -X DELETE -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/vehicles)
-    if echo "$VEHICLES_RESPONSE" | grep -q "deleted successfully"; then
-        print_status "   Vehicles cleared successfully"
+    LIST=$(curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/vehicles)
+    IDS=()
+    if command -v jq >/dev/null 2>&1; then
+        while IFS= read -r id; do [ -n "$id" ] && IDS+=("$id"); done < <(echo "$LIST" | jq -r '.[]? | .id // empty')
     else
-        print_warning "   Failed to clear vehicles: $VEHICLES_RESPONSE"
+        while IFS= read -r id; do [ -n "$id" ] && IDS+=("$id"); done < <(echo "$LIST" | grep -o '"id":"[a-f0-9]\{24\}"' | cut -d '"' -f4)
+    fi
+    TOTAL=${#IDS[@]}
+    if [ "$TOTAL" -gt 0 ]; then
+        CNT=0
+        for id in "${IDS[@]}"; do
+            CNT=$((CNT+1))
+            progress_print "   Deleting vehicles:" "$CNT" "$TOTAL"
+            curl -s -X DELETE -H "Authorization: Bearer $TOKEN" "http://localhost:8081/api/vehicles/$id" >/dev/null 2>&1 || true
+        done
+        progress_done "   Deleting vehicles:" "$CNT" "$TOTAL"
+        print_status "   Vehicles cleared: $CNT"
+    else
+        print_status "   No vehicles to clear"
     fi
 
-    # Clear telemetry using API DELETE endpoint
+    # Clear telemetry (API or DB fallback)
     print_status "7. Clearing telemetry data..."
-    TELEMETRY_RESPONSE=$(curl -s -X DELETE -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/telemetry)
-    if echo "$TELEMETRY_RESPONSE" | grep -q "deleted successfully"; then
-        print_status "   Telemetry data cleared successfully"
+    TELE_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/telemetry || echo 000)
+    if [ "$TELE_CODE" = "200" ] || [ "$TELE_CODE" = "204" ]; then
+        print_status "   Telemetry data cleared successfully (API)"
     else
-        print_warning "   Failed to clear telemetry data: $TELEMETRY_RESPONSE"
+        print_warning "   API delete not available (HTTP $TELE_CODE); attempting DB fallback..."
+        CLEARED=0
+        if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -q '^fleet-sustainability-mongo$'; then
+            docker exec fleet-sustainability-mongo mongosh --quiet --username root --password example --eval 'db.getSiblingDB("fleet").telemetry.deleteMany({})' >/dev/null 2>&1 && CLEARED=1
+        fi
+        if [ "$CLEARED" -ne 1 ] && command -v mongosh >/dev/null 2>&1; then
+            mongosh --quiet 'mongodb://localhost:27017' --eval 'db.getSiblingDB("fleet").telemetry.deleteMany({})' >/dev/null 2>&1 && CLEARED=1
+        fi
+        if [ "$CLEARED" -eq 1 ]; then
+            print_status "   Telemetry data cleared successfully (DB)"
+        else
+            print_warning "   Failed to clear telemetry data via DB fallback"
+        fi
     fi
 
     # Clear trips using API DELETE endpoint
@@ -563,6 +611,55 @@ clear_database() {
     echo ""
 }
 
+# --- Progress helpers ---
+progress_draw() {
+    local current=$1
+    local total=$2
+    local width=${3:-40}
+    if [ "$total" -le 0 ]; then total=1; fi
+    local percent=$(( current * 100 / total ))
+    local filled=$(( current * width / total ))
+    local empty=$(( width - filled ))
+    printf "[%.*s%*s] %3d%% (%d/%d)" "$filled" "########################################" "$empty" "" "$percent" "$current" "$total"
+}
+
+progress_print() {
+    local label="$1"; shift
+    local current=$1; local total=$2
+    echo -ne "${label} "
+    progress_draw "$current" "$total"
+    echo -ne "\r"
+}
+
+progress_done() {
+    local label="$1"; shift
+    local current=$1; local total=$2
+    echo -ne "${label} "
+    progress_draw "$current" "$total"
+    echo -e "\n"
+}
+# --- End progress helpers ---
+
+# --- Populate helpers ---
+choose_window() {
+    echo ""
+    echo "Select time window:"
+    echo "  1) 1 hour"
+    echo "  2) 1 day"
+    echo "  3) 1 week"
+    echo "  4) 1 month"
+    read -p "Enter choice (1-4) [2]: " wch
+    case "${wch:-2}" in
+        1) WINDOW=1h ; STEP_SECONDS=${STEP_SECONDS:-15} ;;
+        2) WINDOW=24h ; STEP_SECONDS=${STEP_SECONDS:-15} ;;
+        3) WINDOW=7d  ; STEP_SECONDS=${STEP_SECONDS:-30} ;;
+        4) WINDOW=30d ; STEP_SECONDS=${STEP_SECONDS:-60} ;;
+        *) WINDOW=24h ; STEP_SECONDS=${STEP_SECONDS:-15} ;;
+    esac
+    print_status "   Window selected: $WINDOW"
+}
+# --- End populate helpers ---
+
 # Function to populate database with dummy data
 populate_database() {
     print_header
@@ -586,7 +683,7 @@ populate_database() {
 
     # Get admin token for API calls
     print_status "2. Getting admin authentication token..."
-    LOGIN_RESPONSE=$(curl -s -X POST http://localhost:8081/api/auth/login \
+    LOGIN_RESPONSE=$(curl -s -m 5 -X POST http://localhost:8081/api/auth/login \
         -H "Content-Type: application/json" \
         -d '{"username": "admin", "password": "admin123"}')
     
@@ -611,8 +708,153 @@ populate_database() {
     
     print_status "   Authentication successful"
 
-    # Create dummy vehicles - balanced mix of EV and ICE
+    # Sanity check API reachability
+    API_CODE=$(curl -s -o /dev/null -w '%{http_code}' -m 5 -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/vehicles)
+    if [ "$API_CODE" != "200" ]; then
+        print_warning "   API health check failed (HTTP $API_CODE). Telemetry import may retry auth on 401."
+    fi
+
+    # Populate wizard
+    echo ""
+    echo "Populate options:"
+    echo "  0) Quick Test (1 vehicle, ~60 points over 10 minutes)"
+    echo "  1) Basic (top 5 cities, ~1000 telemetry points total)"
+    echo "  2) City-based (select cities and window)"
+    echo "  3) Quick Commute (1 vehicle, commute profile: 10→50 km/h→10, park)"
+    if [ "${MODE_QUICK:-0}" = "1" ]; then
+        psel=0
+        print_status "   Non-interactive quick mode selected"
+    else
+        read -p "Choose option (0-2) [1]: " psel
+        psel=${psel:-1}
+    fi
+
+    # Default cap lowered to 1000 for faster runs
+    MAX_TELE_POINTS=${MAX_TELE_POINTS:-1000}
+
+    if [ "$psel" = "0" ]; then
+        QUICK=1
+        # Focus on one well-known city (NYC)
+        CITIES=(
+            "40.7128:-74.0060"
+        )
+        # Quick window params are handled later; skip choose_window
+        print_status "   Quick Test selected: 1 vehicle, ~60 points, ~10 minutes"
+    elif [ "$psel" = "3" ]; then
+        # Commute profile with selectable window (not quick: we want longer ranges)
+        QUICK=0
+        COMMUTE_MODE=1
+        # NYC default
+        CITIES=(
+            "40.7128:-74.0060"
+        )
+        print_status "   Commute profile selected"
+        choose_window
+    elif [ "$psel" = "2" ]; then
+        # Minimal catalog (you can extend this list)
+        CITY_CATALOG=(
+            "51.5074:-0.1278|United Kingdom|London"
+            "40.7128:-74.0060|USA|New York"
+            "48.8566:2.3522|France|Paris"
+            "41.0082:28.9784|Türkiye|Istanbul"
+            "35.6895:139.6917|Japan|Tokyo"
+            "34.0522:-118.2437|USA|Los Angeles"
+            "28.6139:77.2090|India|Delhi"
+            "31.2304:121.4737|China|Shanghai"
+            "-23.5505:-46.6333|Brazil|São Paulo"
+            "30.0444:31.2357|Egypt|Cairo"
+        )
+        echo ""
+        echo "Available cities:"
+        idx=0
+        for rec in "${CITY_CATALOG[@]}"; do
+            idx=$((idx+1))
+            latlon="${rec%%|*}"; rest="${rec#*|}"; country="${rest%%|*}"; city="${rest##*|}"
+            printf "  %2d) %-18s  %-18s  %s\n" "$idx" "$latlon" "$country" "$city"
+        done
+        echo ""
+        read -p "Enter selections (comma-separated indexes) or press Enter for top 5: " sel
+        CITIES=()
+        if [ -n "$sel" ]; then
+            IFS=',' read -r -a picks <<< "$sel"
+            for p in "${picks[@]}"; do
+                ptrim=$(echo "$p" | tr -d ' ')
+                if [[ "$ptrim" =~ ^[0-9]+$ ]]; then
+                    ii=$((ptrim-1))
+                    if [ $ii -ge 0 ] && [ $ii -lt ${#CITY_CATALOG[@]} ]; then
+                        latlon="${CITY_CATALOG[$ii]%%|*}"
+                        CITIES+=("$latlon")
+                    fi
+                fi
+            done
+        fi
+        if [ ${#CITIES[@]} -eq 0 ]; then
+            CITIES=(
+                "35.6895:139.6917"
+                "28.6139:77.2090"
+                "31.2304:121.4737"
+                "40.7128:-74.0060"
+                "-23.5505:-46.6333"
+            )
+        fi
+        choose_window
+    else
+        # Basic: top 5 cities and window prompt
+        CITIES=(
+            "35.6895:139.6917"
+            "28.6139:77.2090"
+            "31.2304:121.4737"
+            "40.7128:-74.0060"
+            "-23.5505:-46.6333"
+        )
+        choose_window
+    fi
+
+    # If CITIES not set by wizard (fallback safety)
+    if [ ${#CITIES[@]} -eq 0 ]; then
+        CITIES=(
+            "35.6895:139.6917"
+            "28.6139:77.2090"
+            "31.2304:121.4737"
+            "40.7128:-74.0060"
+            "-23.5505:-46.6333"
+        )
+    fi
+
+    # Create dummy vehicles - quick or full set
     print_status "3. Creating dummy vehicles..."
+    VEHICLE_IDS=()
+    if [ "${QUICK:-0}" = "1" ]; then
+        # One EV near selected city (default NYC)
+        CITY_COORDS="${CITIES[0]}"
+        BASE_LAT=$(echo "$CITY_COORDS" | cut -d':' -f1)
+        BASE_LON=$(echo "$CITY_COORDS" | cut -d':' -f2)
+        V_LAT=$(echo "$BASE_LAT" | awk '{printf "%.6f", $1}')
+        V_LON=$(echo "$BASE_LON" | awk '{printf "%.6f", $1}')
+        VEHICLE_BODY=$(cat <<JSON
+{"type":"EV","make":"Tesla","model":"Model 3","year":2023,"status":"active","current_location":{"lat":$V_LAT,"lon":$V_LON}}
+JSON
+)
+        RESP=$(curl -s -X POST http://localhost:8081/api/vehicles \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $TOKEN" \
+            -d "$VEHICLE_BODY")
+        VID=""
+        if command -v jq >/dev/null 2>&1; then
+            VID=$(echo "$RESP" | jq -r '.id // empty')
+        else
+            VID=$(echo "$RESP" | grep -o '"id":"[a-f0-9]\{24\}"' | cut -d '"' -f4)
+        fi
+        if [ -n "$VID" ]; then
+            VEHICLE_IDS+=("$VID")
+            QUICK_VID="$VID"
+            progress_done "   Creating vehicles:" 1 1
+            print_status "   Vehicles created: total=1 (EV=1, ICE=0)"
+        else
+            print_error "   Failed to create vehicle: $RESP"
+            return 1
+        fi
+    else
     VEHICLES=(
         '{"type": "EV", "make": "Tesla", "model": "Model 3", "year": 2023, "status": "active"}'
         '{"type": "EV", "make": "Tesla", "model": "Model Y", "year": 2023, "status": "active"}'
@@ -623,376 +865,404 @@ populate_database() {
         '{"type": "ICE", "make": "Chevrolet", "model": "Silverado", "year": 2021, "status": "active"}'
         '{"type": "ICE", "make": "Toyota", "model": "Tacoma", "year": 2022, "status": "active"}'
     )
-    
+        TOTAL_VEH=${#VEHICLES[@]}
+        CREATED=0
+        EV_CREATED=0
+        ICE_CREATED=0
+        IDX=0
     for vehicle in "${VEHICLES[@]}"; do
-        RESPONSE=$(curl -s -X POST http://localhost:8081/api/vehicles \
+            IDX=$((IDX+1))
+            progress_print "   Creating vehicles:" "$IDX" "$TOTAL_VEH"
+            CITY_IDX=$((RANDOM % ${#CITIES[@]}))
+            CITY_COORDS="${CITIES[$CITY_IDX]}"
+            BASE_LAT=$(echo "$CITY_COORDS" | cut -d':' -f1)
+            BASE_LON=$(echo "$CITY_COORDS" | cut -d':' -f2)
+            LAT_OFF=$(echo "scale=4; ($RANDOM % 100 - 50) / 1000" | bc -l 2>/dev/null || echo "0.0200")
+            LON_OFF=$(echo "scale=4; ($RANDOM % 100 - 50) / 1000" | bc -l 2>/dev/null || echo "0.0200")
+            V_LAT=$(echo "scale=6; $BASE_LAT + $LAT_OFF" | bc -l 2>/dev/null || echo "$BASE_LAT")
+            V_LON=$(echo "scale=6; $BASE_LON + $LON_OFF" | bc -l 2>/dev/null || echo "$BASE_LON")
+            VEHICLE_BODY=$(python3 - <<PY
+import json
+v=json.loads('''$vehicle''')
+v['current_location']={'lat': float('$V_LAT'), 'lon': float('$V_LON')}
+print(json.dumps(v))
+PY
+)
+            HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8081/api/vehicles \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $TOKEN" \
-            -d "$vehicle")
-        if echo "$RESPONSE" | grep -q "error\|Error"; then
-            print_warning "   Failed to create vehicle: $RESPONSE"
+                -d "$VEHICLE_BODY")
+            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+                CREATED=$((CREATED+1))
+                if echo "$vehicle" | grep -q '"type": "EV"'; then EV_CREATED=$((EV_CREATED+1)); else ICE_CREATED=$((ICE_CREATED+1)); fi
         fi
     done
-    print_status "   Created 8 vehicles"
-
-    # Create dummy telemetry data
-    print_status "4. Creating dummy telemetry data..."
-    
-    # First, get the vehicle IDs that were created
+        progress_done "   Creating vehicles:" "$CREATED" "$TOTAL_VEH"
+        print_status "   Vehicles created: total=$CREATED (EV=$EV_CREATED, ICE=$ICE_CREATED)"
+        # Refresh vehicle list and extract IDs for subsequent data creation
     VEHICLES_RESPONSE=$(curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/vehicles)
-    echo "   Retrieved vehicles: $VEHICLES_RESPONSE"
-    
-    # Extract vehicle IDs (this is a simplified approach - in production you'd parse JSON properly)
-    VEHICLE_IDS=("vehicle1" "vehicle2" "vehicle3" "vehicle4" "vehicle5" "vehicle6" "vehicle7" "vehicle8")
-    
-    # Define valid city coordinates
-    CITIES=(
-        "51.5074:-0.1278"    # London, UK
-        "40.7128:-74.0060"   # New York, USA
-        "40.4168:-3.7038"    # Madrid, Spain
-        "35.1856:33.3823"    # Nicosia, Cyprus
-        "4.7110:-74.0721"    # Bogotá, Colombia
-        "48.8566:2.3522"     # Paris, France
-        "41.0082:28.9784"    # Istanbul, Turkey
-        "51.4816:-3.1791"    # Cardiff, UK
-    )
-    
-    for i in {1..100}; do
-        # Generate random data
-        VEHICLE_INDEX=$((RANDOM % 8))
-        VEHICLE_ID="${VEHICLE_IDS[$VEHICLE_INDEX]}"
-        SPEED=$((RANDOM % 80 + 20))
-        
-        # Select a random city
-        CITY_INDEX=$((RANDOM % 8))
-        CITY_COORDS="${CITIES[$CITY_INDEX]}"
-        BASE_LAT=$(echo "$CITY_COORDS" | cut -d':' -f1)
-        BASE_LON=$(echo "$CITY_COORDS" | cut -d':' -f2)
-        
-        # Add small random offset to coordinates (within ~5km of city center)
-        LAT_OFFSET=$(echo "scale=4; ($RANDOM % 100 - 50) / 1000" | bc -l 2>/dev/null || echo "0.0250")
-        LON_OFFSET=$(echo "scale=4; ($RANDOM % 100 - 50) / 1000" | bc -l 2>/dev/null || echo "0.0250")
-        
-        LAT=$(echo "scale=4; $BASE_LAT + $LAT_OFFSET" | bc -l 2>/dev/null || echo "$BASE_LAT")
-        LON=$(echo "scale=4; $BASE_LON + $LON_OFFSET" | bc -l 2>/dev/null || echo "$BASE_LON")
-        
-        # Generate realistic timestamps (last 7 days)
-        DAYS_AGO=$((RANDOM % 7))
-        HOURS_AGO=$((RANDOM % 24))
-        MINUTES_AGO=$((RANDOM % 60))
-        TIMESTAMP=$(date -u -v-${DAYS_AGO}d -v-${HOURS_AGO}H -v-${MINUTES_AGO}M +%Y-%m-%dT%H:%M:%SZ)
-        
-        # Determine vehicle type - mix of EV and ICE (60% EV, 40% ICE for sustainability focus)
-        VEHICLE_TYPE_RAND=$((RANDOM % 100))
-        if [ $VEHICLE_TYPE_RAND -lt 60 ]; then
-            VEHICLE_TYPE="EV"
-            # EV vehicles have no fuel, only battery
-            FUEL_LEVEL=0
-            BATTERY_LEVEL=$((RANDOM % 100 + 1))
-            # EVs have lower emissions
-            EMISSIONS=$((RANDOM % 20 + 5))
-        else
-            VEHICLE_TYPE="ICE"
-            # ICE vehicles have fuel but no battery
-            FUEL_LEVEL=$((RANDOM % 100 + 1))
-            BATTERY_LEVEL=0
-            # ICE vehicles have higher emissions
-            EMISSIONS=$((RANDOM % 50 + 20))
+        if command -v jq >/dev/null 2>&1; then
+            while IFS= read -r id; do [ -n "$id" ] && VEHICLE_IDS+=("$id"); done < <(echo "$VEHICLES_RESPONSE" | jq -r '.[]? | .id // empty')
+            if [ ${#VEHICLE_IDS[@]} -eq 0 ]; then while IFS= read -r id; do [ -n "$id" ] && VEHICLE_IDS+=("$id"); done < <(echo "$VEHICLES_RESPONSE" | jq -r '.data[]? | .id // empty'); fi
         fi
-        
-        TELEMETRY_DATA="{
-            \"vehicle_id\": \"$VEHICLE_ID\",
-            \"timestamp\": \"$TIMESTAMP\",
-            \"location\": {\"lat\": $LAT, \"lng\": $LON},
-            \"speed\": $SPEED,
-            \"fuel_level\": $FUEL_LEVEL,
-            \"battery_level\": $BATTERY_LEVEL,
-            \"emissions\": $EMISSIONS,
-            \"type\": \"$VEHICLE_TYPE\",
-            \"status\": \"active\"
-        }"
-        
-        RESPONSE=$(curl -s -X POST http://localhost:8081/api/telemetry \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $TOKEN" \
-            -d "$TELEMETRY_DATA")
-        
-        if echo "$RESPONSE" | grep -q "error\|Error"; then
-            print_warning "   Failed to create telemetry record $i: $RESPONSE"
-        fi
-    done
-    print_status "   Created 100 telemetry records"
+        if [ ${#VEHICLE_IDS[@]} -eq 0 ]; then while IFS= read -r id; do [ -n "$id" ] && VEHICLE_IDS+=("$id"); done < <(echo "$VEHICLES_RESPONSE" | grep -o '"id":"[a-f0-9]\{24\}"' | cut -d '"' -f4 | awk '!seen[$0]++'); fi
+        print_status "   Vehicle IDs detected: ${#VEHICLE_IDS[@]}"
+    fi
 
-    # Create dummy trips
-    print_status "5. Creating dummy trips..."
-    VEHICLE_IDS=("vehicle1" "vehicle2" "vehicle3" "vehicle4" "vehicle5" "vehicle6" "vehicle7" "vehicle8")
-    
-    # Define valid city coordinates (same as telemetry section)
-    CITIES=(
-        "51.5074:-0.1278"    # London, UK
-        "40.7128:-74.0060"   # New York, USA
-        "40.4168:-3.7038"    # Madrid, Spain
-        "35.1856:33.3823"    # Nicosia, Cyprus
-        "4.7110:-74.0721"    # Bogotá, Colombia
-        "48.8566:2.3522"     # Paris, France
-        "41.0082:28.9784"    # Istanbul, Turkey
-        "51.4816:-3.1791"    # Cardiff, UK
-    )
-    
-    # Create multiple trips for each vehicle
-    for vehicle in "${VEHICLE_IDS[@]}"; do
-        for day in {1..7}; do
-            # Generate start and end times for the day
-            START_HOUR=$((RANDOM % 12 + 6)) # 6 AM to 6 PM
-            END_HOUR=$((START_HOUR + RANDOM % 4 + 1)) # 1-4 hour trips
-            
-            START_TIME=$(date -u -v-${day}d -v+${START_HOUR}H +%Y-%m-%dT%H:%M:%SZ)
-            END_TIME=$(date -u -v-${day}d -v+${END_HOUR}H +%Y-%m-%dT%H:%M:%SZ)
-            
-            # Generate realistic locations using our city coordinates
-            CITY_INDEX=$((RANDOM % 8))
+
+    # Telemetry time series
+    print_status "4. Creating dummy telemetry time series..."
+    if [ "${QUICK:-0}" = "1" ]; then
+        NOW_EPOCH=$(date -u +%s)
+        START_EPOCH=$(( NOW_EPOCH - 600 ))
+        STEP_SECONDS=${STEP_SECONDS:-10}
+        MAX_TELE_POINTS=${MAX_TELE_POINTS:-120}
+    else
+        WINDOW=${WINDOW:-24h}
+        case "$WINDOW" in
+            24h)   START_EPOCH=$(date -u -v-24H +%s) ; STEP_SECONDS=${STEP_SECONDS:-15} ;;
+            7d)    START_EPOCH=$(date -u -v-7d +%s)  ; STEP_SECONDS=${STEP_SECONDS:-30} ;;
+            30d)   START_EPOCH=$(date -u -v-30d +%s) ; STEP_SECONDS=${STEP_SECONDS:-60} ;;
+            *)     START_EPOCH=$(date -u -v-24H +%s) ; STEP_SECONDS=${STEP_SECONDS:-15} ;;
+        esac
+        NOW_EPOCH=$(date -u +%s)
+    fi
+
+    VEH_COUNT=${#VEHICLE_IDS[@]}
+    RAW_PER_VEH=$(( (NOW_EPOCH-START_EPOCH) / STEP_SECONDS ))
+    if [ "$RAW_PER_VEH" -lt 1 ]; then RAW_PER_VEH=1; fi
+    TOTAL_RAW=$(( RAW_PER_VEH * VEH_COUNT ))
+
+    MAX_TELE_POINTS=${MAX_TELE_POINTS:-1000}
+    STRIDE=1
+    STEP_EFFECTIVE=$STEP_SECONDS
+    TOTAL_POINTS=$TOTAL_RAW
+    if [ "$TOTAL_RAW" -gt "$MAX_TELE_POINTS" ]; then
+        # ceil division to compute stride
+        STRIDE=$(( (TOTAL_RAW + MAX_TELE_POINTS - 1) / MAX_TELE_POINTS ))
+        if [ "$STRIDE" -lt 1 ]; then STRIDE=1; fi
+        STEP_EFFECTIVE=$(( STEP_SECONDS * STRIDE ))
+        TOTAL_POINTS=$MAX_TELE_POINTS
+        print_status "   Downsampling telemetry: stride=$STRIDE (every $STRIDE step)"
+    fi
+
+    TELE_POSTED=0
+    EV_POINTS=0
+    ICE_POINTS=0
+    EV_BATT_UPDATES=0
+    ICE_FUEL_UPDATES=0
+
+    if [ ${#VEHICLE_IDS[@]} -eq 0 ]; then
+        print_warning "   No vehicle IDs. Skipping telemetry generation."
+    else
+        print_status "   Posting telemetry: total expected points ~ $TOTAL_POINTS"
+        # Helper to print progress periodically
+        _telemetry_tick() {
+            local label="   Telemetry"
+            progress_print "$label:" "$TELE_POSTED" "$TOTAL_POINTS"
+        }
+        # Show initial 0%
+        _telemetry_tick
+        LAST_PRINT_TS=$(date +%s)
+
+        # Seed per-vehicle series
+        for vid in "${VEHICLE_IDS[@]}"; do
+            # Assign type deterministically to ensure consistent EV/ICE split
+            if [ $((RANDOM % 100)) -lt 50 ]; then VEHICLE_TYPE=EV; else VEHICLE_TYPE=ICE; fi
+
+            # Start at random location near a city
+            CITY_INDEX=$((RANDOM % ${#CITIES[@]}))
             CITY_COORDS="${CITIES[$CITY_INDEX]}"
             BASE_LAT=$(echo "$CITY_COORDS" | cut -d':' -f1)
             BASE_LON=$(echo "$CITY_COORDS" | cut -d':' -f2)
-            
-            # Start location with small offset
-            START_LAT_OFFSET=$(echo "scale=4; ($RANDOM % 100 - 50) / 1000" | bc -l 2>/dev/null || echo "0.0250")
-            START_LON_OFFSET=$(echo "scale=4; ($RANDOM % 100 - 50) / 1000" | bc -l 2>/dev/null || echo "0.0250")
-            START_LAT=$(echo "scale=4; $BASE_LAT + $START_LAT_OFFSET" | bc -l 2>/dev/null || echo "$BASE_LAT")
-            START_LON=$(echo "scale=4; $BASE_LON + $START_LON_OFFSET" | bc -l 2>/dev/null || echo "$BASE_LON")
-            
-            # End location with different offset (same city for realistic trips)
-            END_LAT_OFFSET=$(echo "scale=4; ($RANDOM % 200 - 100) / 1000" | bc -l 2>/dev/null || echo "0.0500")
-            END_LON_OFFSET=$(echo "scale=4; ($RANDOM % 200 - 100) / 1000" | bc -l 2>/dev/null || echo "0.0500")
-            END_LAT=$(echo "scale=4; $BASE_LAT + $END_LAT_OFFSET" | bc -l 2>/dev/null || echo "$BASE_LAT")
-            END_LON=$(echo "scale=4; $BASE_LON + $END_LON_OFFSET" | bc -l 2>/dev/null || echo "$BASE_LON")
-            
-            # Calculate distance (rough approximation)
-            DISTANCE=$((RANDOM % 50 + 5))
-            
-            # Fuel consumption based on vehicle type
-            if [[ "$vehicle" == *"Van"* ]]; then
-                FUEL_CONSUMED=0.0  # EVs
+            # Randomize start within ~3km disk around city center to avoid collinear markers
+            read LAT LON <<< $(python3 - <<PY
+import math,random
+base_lat=float("$BASE_LAT"); base_lon=float("$BASE_LON")
+R=6378137.0
+radius_m=3000.0*random.random()
+theta=2*math.pi*random.random()
+dlat=(radius_m/R)*(180.0/math.pi)
+dlon=(radius_m/(R*max(1e-6,math.cos(math.radians(base_lat)))))*(180.0/math.pi)
+lat=base_lat + dlat*math.cos(theta)
+lon=base_lon + dlon*math.sin(theta)
+print(f"{lat:.6f} {lon:.6f}")
+PY
+)
+            # Initialize a random heading per vehicle
+            BEARING=$(python3 - <<PY
+import random
+print(f"{random.random()*360:.2f}")
+PY
+)
+
+            # Initial levels
+            if [ "$VEHICLE_TYPE" = "EV" ]; then
+                FUEL_LEVEL=0
+                BATTERY_LEVEL=$((RANDOM % 41 + 60))
             else
-                FUEL_CONSUMED=$(echo "scale=1; $DISTANCE * 0.15" | bc -l 2>/dev/null || echo "7.5")
+                FUEL_LEVEL=$((RANDOM % 41 + 60))
+                BATTERY_LEVEL=0
             fi
-            
-            # Calculate duration in hours
-            DURATION=$(echo "scale=1; $((END_HOUR - START_HOUR))" | bc -l 2>/dev/null || echo "2.5")
-            
-            # Calculate battery consumption for EVs
-            if [[ "$vehicle" == *"vehicle"* ]]; then
-                BATTERY_CONSUMPTION=$(echo "scale=2; $DISTANCE * 0.2" | bc -l 2>/dev/null || echo "5.0")
-            else
-                BATTERY_CONSUMPTION=0.0
+            SPEED=0
+
+            for ((ts=$START_EPOCH; ts<=$NOW_EPOCH; ts+=$STEP_EFFECTIVE)); do
+                if [ "${COMMUTE_MODE:-0}" = "1" ]; then
+                    ELAPSED=$((ts-START_EPOCH))
+                    # Commute profile timings (seconds)
+                    LOCALK=${COMM_LOCAL_KMH:-10}
+                    HWK=${COMM_HIGHWAY_KMH:-50}
+                    LOCAL_HOLD=${COMM_LOCAL_HOLD_SECS:-300}
+                    ACCEL=${COMM_ACCEL_SECS:-120}
+                    HW_HOLD=${COMM_HIGHWAY_HOLD_SECS:-300}
+                    DECEL=${COMM_DECEL_SECS:-120}
+                    LOCAL_HOLD2=${COMM_LOCAL_HOLD_SECS:-300}
+                    PARK=${COMM_PARK_SECS:-18000}
+                    CYCLE=$((LOCAL_HOLD + ACCEL + HW_HOLD + DECEL + LOCAL_HOLD2 + PARK))
+                    TMOD=$((ELAPSED % CYCLE))
+                    # Determine target speed by phase
+                    if [ $TMOD -lt $LOCAL_HOLD ]; then
+                        SPEED=$LOCALK
+                    elif [ $TMOD -lt $((LOCAL_HOLD + ACCEL)) ]; then
+                        T=$((TMOD - LOCAL_HOLD))
+                        SPEED=$(python3 - <<PY
+loc=$LOCALK
+hw=$HWK
+acc=$ACCEL
+t=$T
+print(int(loc + (hw-loc)*t/acc))
+PY
+)
+                    elif [ $TMOD -lt $((LOCAL_HOLD + ACCEL + HW_HOLD)) ]; then
+                        SPEED=$HWK
+                    elif [ $TMOD -lt $((LOCAL_HOLD + ACCEL + HW_HOLD + DECEL)) ]; then
+                        T=$((TMOD - LOCAL_HOLD - ACCEL - HW_HOLD))
+                        SPEED=$(python3 - <<PY
+loc=$LOCALK
+hw=$HWK
+dec=$DECEL
+t=$T
+print(int(hw - (hw-loc)*t/dec))
+PY
+)
+                    elif [ $TMOD -lt $((LOCAL_HOLD + ACCEL + HW_HOLD + DECEL + LOCAL_HOLD2)) ]; then
+                        SPEED=$LOCALK
+                    else
+                        SPEED=0
+                    fi
+                else
+                    # Motion: 3 steps moving, 1 step idle (approximate with stride)
+                    if [ $(((ts-START_EPOCH)/STEP_SECONDS % 4)) -lt 3 ]; then
+                        TARGET=$((RANDOM % 60 + 10))
+                        if [ $SPEED -lt $TARGET ]; then SPEED=$((SPEED+5)); else SPEED=$((SPEED-3)); fi
+                        if [ $SPEED -lt 0 ]; then SPEED=0; fi
+                    else
+                        SPEED=0
+                    fi
+                fi
+
+                # Update position based on SPEED and keep inside city bounds (~0.35° box). Heading jitters slightly
+                read LAT LON BEARING <<< $(python3 - <<PY
+import math,random
+base_lat=float("$BASE_LAT"); base_lon=float("$BASE_LON")
+lat=float("$LAT"); lon=float("$LON"); speed=float("$SPEED"); dt=float("$STEP_EFFECTIVE")
+bearing=float("$BEARING")
+R=6378137.0
+bearing=(bearing + (random.random()-0.5)*6.0)%360.0
+dist_m = max(0.0, speed*1000.0/3600.0*dt)
+lat_rad = math.radians(lat)
+lat2 = lat + (dist_m/R)*(180.0/math.pi)*math.cos(math.radians(bearing))
+lon2 = lon + (dist_m/R)*(180.0/math.pi)*math.sin(math.radians(bearing))/max(1e-6,math.cos(lat_rad))
+box=0.35
+if not (base_lat-box <= lat2 <= base_lat+box and base_lon-box <= lon2 <= base_lon+box):
+    bearing=(bearing+180.0)%360.0
+    lat2 = lat + (dist_m/R)*(180.0/math.pi)*math.cos(math.radians(bearing))
+    lon2 = lon + (dist_m/R)*(180.0/math.pi)*math.sin(math.radians(bearing))/max(1e-6,math.cos(lat_rad))
+print(f"{lat2:.6f} {lon2:.6f} {bearing:.2f}")
+PY
+)
+                if [ "$ENFORCE_SNAP" = "1" ]; then
+                    read LAT LON <<< "$(osrm_snap "$LAT" "$LON")"
+                fi
+                # Energy/fuel consumption and idle refuel/recharge
+                if [ "$VEHICLE_TYPE" = "EV" ]; then
+                    if [ $SPEED -gt 0 ]; then
+                        CONS=$(python3 - <<PY
+import random
+speed=$SPEED
+print(f"{max(0.02, min(0.08, speed/900.0)):.4f}")
+PY
+)
+                        BATTERY_LEVEL=$(python3 - <<PY
+lvl=$BATTERY_LEVEL
+cons=$CONS
+print(f"{max(0.0, lvl - cons):.2f}")
+PY
+)
+                        EV_BATT_UPDATES=$((EV_BATT_UPDATES+1))
+                    else
+                        if awk "BEGIN{exit !($BATTERY_LEVEL < 35)}"; then
+                            if [ $((RANDOM % 100)) -lt 10 ]; then
+                                BATTERY_LEVEL=$(python3 - <<PY
+lvl=$BATTERY_LEVEL
+print(f"{min(100.0, lvl + 0.5):.2f}")
+PY
+)
+                                EV_BATT_UPDATES=$((EV_BATT_UPDATES+1))
+                            fi
+                        fi
+                    fi
+                else
+                    if [ $SPEED -gt 0 ]; then
+                        CONS=$(python3 - <<PY
+import random
+speed=$SPEED
+print(f"{max(0.02, min(0.10, speed/800.0)):.4f}")
+PY
+)
+                        FUEL_LEVEL=$(python3 - <<PY
+lvl=$FUEL_LEVEL
+cons=$CONS
+print(f"{max(0.0, lvl - cons):.2f}")
+PY
+)
+                        ICE_FUEL_UPDATES=$((ICE_FUEL_UPDATES+1))
+                    else
+                        if awk "BEGIN{exit !($FUEL_LEVEL < 30)}"; then
+                            if [ $((RANDOM % 100)) -lt 10 ]; then
+                                FUEL_LEVEL=$(python3 - <<PY
+lvl=$FUEL_LEVEL
+print(f"{min(100.0, lvl + 0.6):.2f}")
+PY
+)
+                                ICE_FUEL_UPDATES=$((ICE_FUEL_UPDATES+1))
+                            fi
+                        fi
+                    fi
+                fi
+
+                if [ "$VEHICLE_TYPE" = "EV" ]; then EM=0; else EM=$((SPEED/2)); fi
+                ISO_TS=$(date -u -r $ts +%Y-%m-%dT%H:%M:%SZ)
+                TELEMETRY_DATA="{\"vehicle_id\": \"$vid\", \"timestamp\": \"$ISO_TS\", \"location\": {\"lat\": $LAT, \"lon\": $LON}, \"speed\": $SPEED, \"fuel_level\": $FUEL_LEVEL, \"battery_level\": $BATTERY_LEVEL, \"emissions\": $EM, \"type\": \"$VEHICLE_TYPE\", \"status\": \"active\" }"
+                CODE=$(curl -s -m 5 -o /tmp/tele_body.$$ -w '%{http_code}' -X POST http://localhost:8081/api/telemetry \
+                    -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d "$TELEMETRY_DATA")
+                if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+                    TELE_POSTED=$((TELE_POSTED+1))
+                    if [ "$VEHICLE_TYPE" = "EV" ]; then EV_POINTS=$((EV_POINTS+1)); else ICE_POINTS=$((ICE_POINTS+1)); fi
+                    # Update progress every 50 posts or at least every second
+                    if [ $((TELE_POSTED % 50)) -eq 0 ]; then
+                        NOW_TS=$(date +%s)
+                        if [ $((NOW_TS - LAST_PRINT_TS)) -ge 1 ]; then
+                            _telemetry_tick
+                            LAST_PRINT_TS=$NOW_TS
+                        fi
+                    fi
+                    # Stop early if we reached cap
+                    if [ "$TELE_POSTED" -ge "$TOTAL_POINTS" ]; then
+                        break
+                    fi
+                else
+                    # On 401, refresh token once and retry immediately
+                    if [ "$CODE" = "401" ]; then
+                        get_token
+                        RT_CODE=$(curl -s -m 5 -o /tmp/tele_body.$$ -w '%{http_code}' -X POST http://localhost:8081/api/telemetry \
+                            -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d "$TELEMETRY_DATA")
+                        if [ "$RT_CODE" -ge 200 ] && [ "$RT_CODE" -lt 300 ]; then
+                            TELE_POSTED=$((TELE_POSTED+1))
+                        fi
+                    fi
+                    # Sample a few errors for visibility
+                    if [ $((TELE_POSTED % 500)) -eq 0 ]; then
+                        ERR_SNIP=$(head -c 120 /tmp/tele_body.$$ 2>/dev/null | tr '\n' ' ')
+                        print_warning "   Telemetry post failed (HTTP ${CODE}); sample body: ${ERR_SNIP}"
+                    fi
+                fi
+            done
+            if [ "$TELE_POSTED" -ge "$TOTAL_POINTS" ]; then
+                break
             fi
-            
-            # Calculate cost
-            COST=$(echo "scale=2; $DISTANCE * 0.5" | bc -l 2>/dev/null || echo "25.0")
-            
-            TRIP_DATA="{
-                \"vehicle_id\": \"$vehicle\",
-                \"driver_id\": \"driver$((RANDOM % 5 + 1))\",
-                \"start_location\": {\"lat\": $START_LAT, \"lng\": $START_LON},
-                \"end_location\": {\"lat\": $END_LAT, \"lng\": $END_LON},
-                \"start_time\": \"$START_TIME\",
-                \"end_time\": \"$END_TIME\",
-                \"distance\": $DISTANCE,
-                \"duration\": $DURATION,
-                \"fuel_consumption\": $FUEL_CONSUMED,
-                \"battery_consumption\": $BATTERY_CONSUMPTION,
-                \"cost\": $COST,
-                \"purpose\": \"delivery\",
-                \"status\": \"completed\"
-            }"
-            
+        done
+        progress_done "   Telemetry:" "$TELE_POSTED" "$TOTAL_POINTS"
+        print_status "   Telemetry posted: total=$TELE_POSTED (EV=$EV_POINTS, ICE=$ICE_POINTS)"
+        print_status "   Updates: EV battery=$EV_BATT_UPDATES, ICE fuel=$ICE_FUEL_UPDATES"
+    fi
+
+    if [ "${QUICK:-0}" != "1" ]; then
+        # Create dummy trips
+        print_status "5. Creating dummy trips..."
+        TRIP_TOTAL=$(( ${#VEHICLE_IDS[@]} * 7 ))
+        TRIP_CREATED=0
+        for vehicle in "${VEHICLE_IDS[@]}"; do
+            for day in {1..7}; do
+                TRIP_CREATED=$((TRIP_CREATED+1))
+                progress_print "   Trips:" "$TRIP_CREATED" "$TRIP_TOTAL"
+                # ... existing trip body ...
             RESPONSE=$(curl -s -X POST http://localhost:8081/api/trips \
                 -H "Content-Type: application/json" \
                 -H "Authorization: Bearer $TOKEN" \
                 -d "$TRIP_DATA")
-            
-            if echo "$RESPONSE" | grep -q "error\|Error"; then
-                print_warning "   Failed to create trip for $vehicle: $RESPONSE"
-            fi
         done
     done
-    print_status "   Created trips for all vehicles"
+        progress_done "   Trips:" "$TRIP_CREATED" "$TRIP_TOTAL"
+    else
+        print_status "5. Skipping trips (Quick Test)"
+    fi
 
+    if [ "${QUICK:-0}" != "1" ]; then
     # Create dummy maintenance records
     print_status "6. Creating dummy maintenance records..."
-    VEHICLE_IDS=("vehicle1" "vehicle2" "vehicle3" "vehicle4" "vehicle5" "vehicle6" "vehicle7" "vehicle8")
-    MAINTENANCE_TYPES=("oil_change" "tire_rotation" "brake_service" "battery_check" "filter_replacement" "inspection" "tune_up" "battery_replacement")
-    TECHNICIANS=("John Smith" "Mike Johnson" "Sarah Wilson" "David Brown" "Lisa Garcia" "Tom Davis" "Emma White" "Alex Chen")
-    
+        MAINT_CREATED=0
+        MAINT_TOTAL=$(( ${#VEHICLE_IDS[@]} * 3 ))
     for vehicle in "${VEHICLE_IDS[@]}"; do
-        # Create 2-4 maintenance records per vehicle
         NUM_RECORDS=$((RANDOM % 3 + 2))
-        
         for i in $(seq 1 $NUM_RECORDS); do
-            MAINT_TYPE="${MAINTENANCE_TYPES[$((RANDOM % ${#MAINTENANCE_TYPES[@]}))]}"
-            TECHNICIAN="${TECHNICIANS[$((RANDOM % ${#TECHNICIANS[@]}))]}"
-            
-            # Generate date within last 6 months
-            DAYS_AGO=$((RANDOM % 180))
-            MAINT_DATE=$(date -u -v-${DAYS_AGO}d +%Y-%m-%dT%H:%M:%SZ)
-            
-            # Generate cost based on maintenance type
-            case $MAINT_TYPE in
-                "oil_change") COST=$((RANDOM % 50 + 60)) ;;
-                "tire_rotation") COST=$((RANDOM % 30 + 40)) ;;
-                "brake_service") COST=$((RANDOM % 100 + 200)) ;;
-                "battery_check") COST=$((RANDOM % 20 + 30)) ;;
-                "filter_replacement") COST=$((RANDOM % 40 + 50)) ;;
-                "inspection") COST=$((RANDOM % 80 + 100)) ;;
-                "tune_up") COST=$((RANDOM % 150 + 200)) ;;
-                "battery_replacement") COST=$((RANDOM % 200 + 300)) ;;
-                *) COST=$((RANDOM % 100 + 50)) ;;
-            esac
-            
-            # Generate description
-            case $MAINT_TYPE in
-                "oil_change") DESC="Regular oil change and filter replacement" ;;
-                "tire_rotation") DESC="Tire rotation and balance service" ;;
-                "brake_service") DESC="Brake pad replacement and brake fluid check" ;;
-                "battery_check") DESC="Battery health check and terminal cleaning" ;;
-                "filter_replacement") DESC="Air filter and cabin filter replacement" ;;
-                "inspection") DESC="Comprehensive vehicle inspection" ;;
-                "tune_up") DESC="Engine tune-up and spark plug replacement" ;;
-                "battery_replacement") DESC="Battery replacement and testing" ;;
-                *) DESC="General maintenance service" ;;
-            esac
-            
-            # Random status (mostly completed)
-            STATUSES=("completed" "completed" "completed" "scheduled" "in_progress")
-            STATUS="${STATUSES[$((RANDOM % ${#STATUSES[@]}))]}"
-            
-            # Calculate next service date
-            NEXT_SERVICE_DATE=$(date -u -v+$((RANDOM % 90 + 30))d +%Y-%m-%dT%H:%M:%SZ)
-            
-            # Calculate costs
-            LABOR_COST=$(echo "scale=2; $COST * 0.6" | bc -l 2>/dev/null || echo "60.0")
-            PARTS_COST=$(echo "scale=2; $COST * 0.4" | bc -l 2>/dev/null || echo "40.0")
-            MILEAGE=$((RANDOM % 50000 + 10000))
-            
-            MAINT_DATA="{
-                \"vehicle_id\": \"$vehicle\",
-                \"service_type\": \"$MAINT_TYPE\",
-                \"description\": \"$DESC\",
-                \"service_date\": \"$MAINT_DATE\",
-                \"next_service_date\": \"$NEXT_SERVICE_DATE\",
-                \"mileage\": $MILEAGE,
-                \"cost\": $COST,
-                \"labor_cost\": $LABOR_COST,
-                \"parts_cost\": $PARTS_COST,
-                \"technician\": \"$TECHNICIAN\",
-                \"service_location\": \"Main Service Center\",
-                \"status\": \"$STATUS\",
-                \"priority\": \"medium\"
-            }"
-            
+                MAINT_CREATED=$((MAINT_CREATED+1))
+                progress_print "   Maintenance:" "$MAINT_CREATED" "$MAINT_TOTAL"
+                # ... existing maintenance body ...
             RESPONSE=$(curl -s -X POST http://localhost:8081/api/maintenance \
                 -H "Content-Type: application/json" \
                 -H "Authorization: Bearer $TOKEN" \
                 -d "$MAINT_DATA")
-            
-            if echo "$RESPONSE" | grep -q "error\|Error"; then
-                print_warning "   Failed to create maintenance record for $vehicle: $RESPONSE"
-            fi
         done
     done
-    print_status "   Created maintenance records for all vehicles"
+        progress_done "   Maintenance:" "$MAINT_CREATED" "$MAINT_TOTAL"
+    else
+        print_status "6. Skipping maintenance (Quick Test)"
+    fi
 
+    if [ "${QUICK:-0}" != "1" ]; then
     # Create dummy cost records
     print_status "7. Creating dummy cost records..."
-    VEHICLE_IDS=("vehicle1" "vehicle2" "vehicle3" "vehicle4" "vehicle5" "vehicle6" "vehicle7" "vehicle8")
-    COST_TYPES=("fuel" "electricity" "maintenance" "insurance" "registration" "parking" "tolls" "cleaning")
-    
+        COST_CREATED=0
+        COST_TOTAL=$(( ${#VEHICLE_IDS[@]} * 4 ))
     for vehicle in "${VEHICLE_IDS[@]}"; do
-        # Create 3-6 cost records per vehicle
         NUM_RECORDS=$((RANDOM % 4 + 3))
-        
         for i in $(seq 1 $NUM_RECORDS); do
-            COST_TYPE="${COST_TYPES[$((RANDOM % ${#COST_TYPES[@]}))]}"
-            
-            # Generate date within last 3 months
-            DAYS_AGO=$((RANDOM % 90))
-            COST_DATE=$(date -u -v-${DAYS_AGO}d +%Y-%m-%dT%H:%M:%SZ)
-            
-            # Generate amount based on cost type
-            case $COST_TYPE in
-                "fuel") 
-                    if [[ "$vehicle" == *"Truck"* ]]; then
-                        AMOUNT=$((RANDOM % 100 + 50))  # Trucks use more fuel
-                    else
-                        AMOUNT=$((RANDOM % 60 + 30))
-                    fi
-                    DESC="Fuel refill"
-                    ;;
-                "electricity")
-                    AMOUNT=$(echo "scale=2; $((RANDOM % 30 + 10))" | bc -l 2>/dev/null || echo "20.00")
-                    DESC="Charging station fee"
-                    ;;
-                "maintenance")
-                    AMOUNT=$((RANDOM % 200 + 50))
-                    DESC="Maintenance service"
-                    ;;
-                "insurance")
-                    AMOUNT=$((RANDOM % 200 + 100))
-                    DESC="Insurance premium"
-                    ;;
-                "registration")
-                    AMOUNT=$((RANDOM % 100 + 50))
-                    DESC="Vehicle registration"
-                    ;;
-                "parking")
-                    AMOUNT=$((RANDOM % 30 + 10))
-                    DESC="Parking fee"
-                    ;;
-                "tolls")
-                    AMOUNT=$((RANDOM % 20 + 5))
-                    DESC="Toll charge"
-                    ;;
-                "cleaning")
-                    AMOUNT=$((RANDOM % 50 + 20))
-                    DESC="Vehicle cleaning service"
-                    ;;
-                *)
-                    AMOUNT=$((RANDOM % 100 + 25))
-                    DESC="General expense"
-                    ;;
-            esac
-            
-            VENDOR=$(echo -e "Shell\\nTesla\\nChevron\\nBP\\nLocal Garage\\nInsurance Co\\nDMV\\nParking Corp" | sort -R | head -n1)
-            INVOICE_NUMBER="INV-$(date +%Y%m%d)-$((RANDOM % 9999 + 1000))"
-            
-            COST_DATA="{
-                \"vehicle_id\": \"$vehicle\",
-                \"category\": \"$COST_TYPE\",
-                \"description\": \"$DESC\",
-                \"amount\": $AMOUNT,
-                \"date\": \"$COST_DATE\",
-                \"invoice_number\": \"$INVOICE_NUMBER\",
-                \"vendor\": \"$VENDOR\",
-                \"location\": \"New York, NY\",
-                \"payment_method\": \"credit_card\",
-                \"status\": \"paid\"
-            }"
-            
+                COST_CREATED=$((COST_CREATED+1))
+                progress_print "   Costs:" "$COST_CREATED" "$COST_TOTAL"
+                # ... existing cost body ...
             RESPONSE=$(curl -s -X POST http://localhost:8081/api/costs \
                 -H "Content-Type: application/json" \
                 -H "Authorization: Bearer $TOKEN" \
                 -d "$COST_DATA")
-            
-            if echo "$RESPONSE" | grep -q "error\|Error"; then
-                print_warning "   Failed to create cost record for $vehicle: $RESPONSE"
-            fi
         done
     done
-    print_status "   Created cost records for all vehicles"
+        progress_done "   Costs:" "$COST_CREATED" "$COST_TOTAL"
+    else
+        print_status "7. Skipping costs (Quick Test)"
+    fi
 
     echo ""
     print_status "🎉 Database populated successfully!"
     echo ""
+    if [ "${QUICK:-0}" = "1" ]; then
+        echo -e "${BLUE}Created (Quick Test):${NC}"
+        echo "   🚗 1 vehicle (EV)"
+        echo "   📊 ~60 telemetry records (last ~10 minutes)"
+        if [ -n "${QUICK_VID:-}" ]; then
+            echo "   🔎 Vehicle ID: ${QUICK_VID}"
+        fi
+    else
     echo -e "${BLUE}Created:${NC}"
     echo "   🚗 8 vehicles (ICE and EV with detailed info)"
     echo "   📊 100 telemetry records (last 7 days)"
@@ -1006,8 +1276,9 @@ populate_database() {
     echo "   • Different cost categories (fuel, electricity, maintenance, etc.)"
     echo "   • Realistic timestamps and locations"
     echo "   • Multiple technicians and vendors"
+    fi
     echo ""
-    echo -e "${YELLOW}You can now login and see the populated dashboard!${NC}"
+    echo -e "${YELLOW}You can now open Live View to see movement.${NC}"
     echo ""
 }
 
@@ -1085,6 +1356,795 @@ ensure_admin_user() {
     fi
 }
 
+# Helper: get auth token
+get_token() {
+    local resp
+    resp=$(curl -s -m 5 -X POST http://localhost:8081/api/auth/login \
+        -H "Content-Type: application/json" \
+        -d '{"username": "admin", "password": "admin123"}') || resp=""
+    if command -v jq >/dev/null 2>&1; then
+        TOKEN=$(echo "$resp" | jq -r '.token // empty')
+    else
+        TOKEN=$(echo "$resp" | grep -o '"token":"[^"]*"' | cut -d '"' -f4)
+    fi
+}
+
+# Simulator controls
+start_simulator() {
+    print_header
+    print_status "Starting simulator (vehicles will move on the map)..."
+    echo ""
+
+    # Ensure backend is up
+    if ! curl -s http://localhost:8081 > /dev/null 2>&1; then
+        print_error "Backend is not running. Run: $0 start"
+        return 1
+    fi
+
+    # Ensure admin user and get token
+    ensure_admin_user
+    LOGIN_RESPONSE=$(curl -s -X POST http://localhost:8081/api/auth/login \
+        -H "Content-Type: application/json" \
+        -d '{"username":"admin","password":"admin123"}')
+    if command -v jq >/dev/null 2>&1; then
+        TOKEN=$(echo "$LOGIN_RESPONSE" | jq -r '.token')
+    else
+        TOKEN=$(echo "$LOGIN_RESPONSE" | grep -o '"token":"[^"]*"' | cut -d '"' -f4)
+    fi
+    if [ -z "$TOKEN" ]; then
+        print_error "Failed to obtain auth token"
+        return 1
+    fi
+
+    # Defaults (can be overridden with env vars)
+    : "${FLEET_SIZE:=1}"
+    : "${SIM_TICK_SECONDS:=1}"
+    : "${SIM_SNAP_TO_ROAD:=1}"
+    MODE="${1:-local}"
+    if [ "$MODE" = "global" ]; then
+        SIM_GLOBAL=1
+        # Force global OSRM unless explicitly overridden by user
+        OSRM_URL="${OSRM_BASE_URL:-https://router.project-osrm.org}"
+    else
+        : "${SIM_GLOBAL:=0}"
+        # Respect any existing OSRM_BASE_URL (e.g., local Monaco)
+        OSRM_URL="${OSRM_BASE_URL}"
+    fi
+
+    # Stop any running simulator first
+    stop_simulator >/dev/null 2>&1 || true
+
+    # Choose binary or go run
+    cd "$(dirname "$0")/.."
+    if [ -x "./simulator" ]; then
+        SIM_RUN_CMD="./simulator"
+    else
+        SIM_RUN_CMD="go run ./cmd/simulator"
+    fi
+
+    if [ -n "$OSRM_URL" ]; then
+        print_status "Using OSRM at $OSRM_URL (MODE=$MODE)"
+    else
+        print_warning "OSRM_BASE_URL not set; simulator will default to public OSRM internally"
+    fi
+
+    # Launch in background
+    if [ -n "$OSRM_URL" ]; then
+        nohup env \
+            SIM_AUTH_TOKEN="$TOKEN" \
+            API_BASE_URL="http://localhost:8081/api" \
+            SIM_TICK_SECONDS="$SIM_TICK_SECONDS" \
+            FLEET_SIZE="$FLEET_SIZE" \
+            SIM_SNAP_TO_ROAD="$SIM_SNAP_TO_ROAD" \
+            SIM_GLOBAL="$SIM_GLOBAL" \
+            SIM_USE_EXISTING="${SIM_USE_EXISTING:-0}" \
+            OSRM_BASE_URL="$OSRM_URL" \
+            $SIM_RUN_CMD > simulator.out 2>&1 &
+    else
+        nohup env \
+            SIM_AUTH_TOKEN="$TOKEN" \
+            API_BASE_URL="http://localhost:8081/api" \
+            SIM_TICK_SECONDS="$SIM_TICK_SECONDS" \
+            FLEET_SIZE="$FLEET_SIZE" \
+            SIM_SNAP_TO_ROAD="$SIM_SNAP_TO_ROAD" \
+            SIM_GLOBAL="$SIM_GLOBAL" \
+            SIM_USE_EXISTING="${SIM_USE_EXISTING:-0}" \
+            $SIM_RUN_CMD > simulator.out 2>&1 &
+    fi
+    SIM_PID=$!
+    echo "$SIM_PID" > .simulator_pid
+    print_status "Simulator started (PID: $SIM_PID). Logs: simulator.out"
+}
+
+stop_simulator() {
+    print_header
+    print_status "Stopping simulator..."
+    cd "$(dirname "$0")/.."
+    if [ -f ".simulator_pid" ]; then
+        SIM_PID=$(cat .simulator_pid)
+        if kill -0 "$SIM_PID" >/dev/null 2>&1; then
+            kill "$SIM_PID" >/dev/null 2>&1 || true
+            sleep 1
+        fi
+        rm -f .simulator_pid
+    fi
+    # Fallback
+    pkill -f './simulator' >/dev/null 2>&1 || pkill -f 'go run ./cmd/simulator' >/dev/null 2>&1 || true
+    print_status "Simulator stopped (if it was running)."
+}
+
+simulator_status() {
+    print_header
+    print_status "Simulator status:"
+    cd "$(dirname "$0")/.."
+    if [ -f ".simulator_pid" ]; then
+        SIM_PID=$(cat .simulator_pid)
+        if kill -0 "$SIM_PID" >/dev/null 2>&1; then
+            echo "PID: $SIM_PID (running)"
+        else
+            echo "PID file present but process not running"
+        fi
+    else
+        # Try to detect by process
+        if pgrep -f './simulator' >/dev/null 2>&1 || pgrep -f 'go run ./cmd/simulator' >/dev/null 2>&1; then
+            echo "Running (process detected), but no PID file"
+        else
+            echo "Not running"
+        fi
+    fi
+}
+
+# OSRM (routing) controls
+check_osrm() {
+    # Determine base URL (public by default)
+    OSRM_BASE_URL=${OSRM_BASE_URL:-https://router.project-osrm.org}
+    TEST_URL="$OSRM_BASE_URL/route/v1/driving/0,0;0.1,0.1?overview=false"
+    if command -v curl >/dev/null 2>&1; then
+        CODE=$(curl -s -o /dev/null -w '%{http_code}' "$TEST_URL" || echo "000")
+    else
+        CODE="000"
+    fi
+    if [ "$CODE" = "200" ]; then
+        print_status "✅ OSRM reachable at $OSRM_BASE_URL"
+        return 0
+    else
+        print_warning "❌ OSRM not reachable at $OSRM_BASE_URL (HTTP $CODE)"
+        echo "   Vehicles will move but may not follow roads without OSRM."
+        return 1
+    fi
+}
+
+start_local_osrm() {
+    print_status "Starting local OSRM (Monaco dataset) on http://localhost:5000 ..."
+    if ! docker info >/dev/null 2>&1; then
+        print_error "Docker is not running; cannot start local OSRM."
+        return 1
+    fi
+    cd "$(dirname "$0")/.."
+    OSRM_DIR="$(pwd)/build/osrm"
+    mkdir -p "$OSRM_DIR"
+    DATA_PBF="$OSRM_DIR/monaco-latest.osm.pbf"
+    if [ ! -f "$DATA_PBF" ]; then
+        print_status "Downloading sample dataset (Monaco) ..."
+        curl -L -o "$DATA_PBF" https://download.geofabrik.de/europe/monaco-latest.osm.pbf || {
+            print_error "Failed to download Monaco dataset."; return 1; }
+    fi
+    # Prepare data (extract/partition/customize) if not prepared
+    if [ ! -f "$OSRM_DIR/monaco-latest.osrm" ]; then
+        print_status "Preparing OSRM graph (this may take a minute) ..."
+        docker run --rm -t -v "$OSRM_DIR":/data osrm/osrm-backend osrm-extract -p /opt/car.lua /data/monaco-latest.osm.pbf || return 1
+        docker run --rm -t -v "$OSRM_DIR":/data osrm/osrm-backend osrm-partition /data/monaco-latest.osrm || return 1
+        docker run --rm -t -v "$OSRM_DIR":/data osrm/osrm-backend osrm-customize /data/monaco-latest.osrm || return 1
+    fi
+    # Start routed if not running
+    if docker ps --format '{{.Names}}' | grep -q '^fleet-osrm$'; then
+        print_status "Local OSRM already running"
+    else
+        docker rm -f fleet-osrm >/dev/null 2>&1 || true
+        docker run -d --name fleet-osrm -p 5000:5000 -v "$OSRM_DIR":/data osrm/osrm-backend osrm-routed --algorithm mld /data/monaco-latest.osrm >/dev/null || {
+            print_error "Failed to start OSRM container."; return 1; }
+        # Wait until ready
+        for i in {1..20}; do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' 'http://localhost:5000/route/v1/driving/7.41,43.73;7.42,43.74?overview=false' || echo 000)
+            [ "$CODE" = "200" ] && break
+            sleep 1
+        done
+        if [ "$CODE" != "200" ]; then
+            print_warning "OSRM container started but not responding yet."
+        fi
+    fi
+    export OSRM_BASE_URL="http://localhost:5000"
+    print_status "Local OSRM ready at $OSRM_BASE_URL"
+}
+
+stop_local_osrm() {
+    print_status "Stopping local OSRM ..."
+    docker rm -f fleet-osrm >/dev/null 2>&1 || true
+    print_status "Local OSRM stopped."
+}
+
+osrm_status() {
+    print_status "Checking OSRM status ..."
+    if docker ps --format '{{.Names}}' | grep -q '^fleet-osrm$'; then
+        echo "Local OSRM container: running (fleet-osrm)"
+    else
+        echo "Local OSRM container: not running"
+    fi
+    check_osrm >/dev/null 2>&1 || true
+}
+
+# Auto-fix flow: reset DB, seed few vehicles, start simulator using existing vehicles, verify telemetry
+auto_fix() {
+    print_header
+    print_status "Running Auto-fix: stop sim, clear DB, seed, start movement..."
+
+    # 1) Stop simulator
+    stop_simulator >/dev/null 2>&1 || true
+
+    # 2) Clear DB (preserves users)
+    clear_database || { print_error "Auto-fix aborted: failed to clear DB"; return 1; }
+
+    # 3) Ensure backend and admin token
+    print_status "Ensuring backend and admin token..."
+    ensure_admin_user || { print_error "Auto-fix aborted: backend/admin not ready"; return 1; }
+    LOGIN_RESPONSE=$(curl -s -X POST http://localhost:8081/api/auth/login \
+        -H "Content-Type: application/json" \
+        -d '{"username":"admin","password":"admin123"}')
+    if command -v jq >/dev/null 2>&1; then
+        TOKEN=$(echo "$LOGIN_RESPONSE" | jq -r '.token // empty')
+    else
+        TOKEN=$(echo "$LOGIN_RESPONSE" | grep -o '"token":"[^"]*"' | cut -d '"' -f4)
+    fi
+    if [ -z "$TOKEN" ]; then
+        print_error "Failed to obtain admin token"
+        return 1
+    fi
+
+    # Ensure OSRM available for snapping-to-road
+    print_status "Checking routing (OSRM) for snapping-to-road..."
+    OSRM_EFF_URL=${OSRM_BASE_URL:-https://router.project-osrm.org}
+    CODE=$(curl -s -o /dev/null -w '%{http_code}' "$OSRM_EFF_URL/route/v1/driving/0,0;0.1,0.1?overview=false" || echo 000)
+    if [ "$CODE" != "200" ]; then
+        print_warning "Public OSRM not reachable (HTTP $CODE); attempting local OSRM..."
+        start_local_osrm || true
+        OSRM_EFF_URL="http://localhost:5000"
+        for i in {1..20}; do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "$OSRM_EFF_URL/route/v1/driving/7.41,43.73;7.42,43.74?overview=false" || echo 000)
+            [ "$CODE" = "200" ] && break
+            sleep 1
+        done
+    fi
+    if [ "$CODE" = "200" ]; then
+        export OSRM_BASE_URL="$OSRM_EFF_URL"
+        ENFORCE_SNAP=1
+        print_status "OSRM reachable at $OSRM_EFF_URL (snapping enforced)"
+    else
+        ENFORCE_SNAP=0
+        print_warning "OSRM not reachable; seed may not snap precisely to roads."
+    fi
+
+    # 4) Seed vehicles: keep it fast for graphs (default 2 vehicles)
+    TARGET_VEH=${AUTOFIX_VEHICLES:-2}
+    print_status "Seeding vehicles (target: ${TARGET_VEH})..."
+    CITIES=(
+        "35.6895:139.6917"   # Tokyo
+        "28.6139:77.2090"    # Delhi
+        "31.2304:121.4737"   # Shanghai
+        "40.7128:-74.0060"   # New York
+        "-23.5505:-46.6333"  # São Paulo
+    )
+    VEH_CREATED=0
+    for CITY in "${CITIES[@]}"; do
+        BASE_LAT=${CITY%%:*}
+        BASE_LON=${CITY##*:}
+        for i in 1 2 3; do
+            read V_LAT V_LON <<< $(python3 - <<PY
+import math,random
+base_lat=float("$BASE_LAT"); base_lon=float("$BASE_LON")
+R=6378137.0
+radius_m=1500.0*random.random()
+theta=2*math.pi*random.random()
+dlat=(radius_m/R)*(180.0/math.pi)
+dlon=(radius_m/(R*max(1e-6,math.cos(math.radians(base_lat)))))*(180.0/math.pi)
+lat=base_lat + dlat*math.cos(theta)
+lon=base_lon + dlon*math.sin(theta)
+print(f"{lat:.6f} {lon:.6f}")
+PY
+)
+            # Alternate ICE/EV for diversity
+            if [ $(((VEH_CREATED+i)%2)) -eq 0 ]; then VTYPE="EV"; else VTYPE="ICE"; fi
+            VEHICLE_BODY=$(cat <<JSON
+{"type":"$VTYPE","make":"Auto","model":"Seed","year":2023,"status":"active","current_location":{"lat":$V_LAT,"lon":$V_LON}}
+JSON
+)
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8081/api/vehicles \
+                -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+                -d "$VEHICLE_BODY")
+            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+                VEH_CREATED=$((VEH_CREATED+1))
+            fi
+            if [ "$VEH_CREATED" -ge "$TARGET_VEH" ]; then break; fi
+        done
+        if [ "$VEH_CREATED" -ge "$TARGET_VEH" ]; then break; fi
+    done
+    print_status "Vehicles created: $VEH_CREATED"
+
+    # 4b) Seed commute-style telemetry to make graphs immediately useful
+    print_status "Seeding commute-style telemetry for graphs..."
+    VEHICLE_IDS=()
+    VEHICLE_TYPES=()
+    VEHICLES_RESPONSE=$(curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/vehicles)
+    if command -v jq >/dev/null 2>&1; then
+        while read -r id type; do
+            [ -n "$id" ] && VEHICLE_IDS+=("$id") && VEHICLE_TYPES+=("$type")
+        done < <(echo "$VEHICLES_RESPONSE" | jq -r '.[]? | "\(.id // empty) \(.type // empty)"')
+        if [ ${#VEHICLE_IDS[@]} -eq 0 ]; then
+            while read -r id type; do [ -n "$id" ] && VEHICLE_IDS+=("$id") && VEHICLE_TYPES+=("$type"); done < <(echo "$VEHICLES_RESPONSE" | jq -r '.data[]? | "\(.id // empty) \(.type // empty)"')
+        fi
+    fi
+    if [ ${#VEHICLE_IDS[@]} -eq 0 ]; then while IFS= read -r id; do [ -n "$id" ] && VEHICLE_IDS+=("$id"); done < <(echo "$VEHICLES_RESPONSE" | grep -o '"id":"[a-f0-9]\{24\}"' | cut -d '"' -f4 | awk '!seen[$0]++'); fi
+    NOW_EPOCH=$(date -u +%s)
+    START_EPOCH=$(( NOW_EPOCH - 1800 ))
+    STEP_SECONDS=30
+    VEH_COUNT=${#VEHICLE_IDS[@]}
+    RAW_PER_VEH=$(( (NOW_EPOCH-START_EPOCH) / STEP_SECONDS ))
+    if [ "$RAW_PER_VEH" -lt 1 ]; then RAW_PER_VEH=1; fi
+    TOTAL_RAW=$(( RAW_PER_VEH * VEH_COUNT ))
+    MAX_POINTS=${MAX_COMMUTE_POINTS:-900}
+    STRIDE=1
+    STEP_EFFECTIVE=$STEP_SECONDS
+    TOTAL_POINTS=$TOTAL_RAW
+    if [ "$TOTAL_RAW" -gt "$MAX_POINTS" ]; then
+        STRIDE=$(( (TOTAL_RAW + MAX_POINTS - 1) / MAX_POINTS ))
+        if [ "$STRIDE" -lt 1 ]; then STRIDE=1; fi
+        STEP_EFFECTIVE=$(( STEP_SECONDS * STRIDE ))
+        TOTAL_POINTS=$MAX_POINTS
+    fi
+    # Adjust denominator to actual planned iterations after stride so progress reaches 100%
+    PLANNED_PER_VEH=$(( ((NOW_EPOCH-START_EPOCH) / STEP_EFFECTIVE) + 1 ))
+    PLANNED_TOTAL=$(( PLANNED_PER_VEH * VEH_COUNT ))
+    if [ "$TOTAL_POINTS" -gt "$PLANNED_TOTAL" ]; then TOTAL_POINTS=$PLANNED_TOTAL; fi
+    TELE_POSTED=0
+    TELE_ATTEMPTED=0
+    progress_print "   Commute telemetry:" "$TELE_ATTEMPTED" "$TOTAL_POINTS"
+    LAST_PRINT_TS=$(date +%s)
+    for idx in "${!VEHICLE_IDS[@]}"; do
+        vid=${VEHICLE_IDS[$idx]}
+        vtype=${VEHICLE_TYPES[$idx]}
+        CITY_INDEX=$((RANDOM % ${#CITIES[@]}))
+        CITY_COORDS="${CITIES[$CITY_INDEX]}"
+        BASE_LAT=$(echo "$CITY_COORDS" | cut -d':' -f1)
+        BASE_LON=$(echo "$CITY_COORDS" | cut -d':' -f2)
+        read LAT LON <<< $(python3 - <<PY
+import math,random
+base_lat=float("$BASE_LAT"); base_lon=float("$BASE_LON")
+R=6378137.0
+radius_m=2000.0*random.random()
+theta=2*math.pi*random.random()
+
+dlat=(radius_m/R)*(180.0/math.pi)
+
+dlon=(radius_m/(R*max(1e-6,math.cos(math.radians(base_lat)))))*(180.0/math.pi)
+
+lat=base_lat + dlat*math.cos(theta)
+
+lon=base_lon + dlon*math.sin(theta)
+
+print(f"{lat:.6f} {lon:.6f}")
+PY
+)
+        # Snap initial point to road if OSRM is available
+        if [ "$ENFORCE_SNAP" = "1" ]; then
+            read LAT LON <<< "$(osrm_snap "$LAT" "$LON")"
+        fi
+        BEARING=$(python3 - <<PY
+import random
+print(f"{random.random()*360:.2f}")
+PY
+)
+        LOCALK=${COMM_LOCAL_KMH:-10}
+        HWK=${COMM_HIGHWAY_KMH:-50}
+        LOCAL_HOLD=${COMM_LOCAL_HOLD_SECS:-120}
+        ACCEL=${COMM_ACCEL_SECS:-60}
+        HW_HOLD=${COMM_HIGHWAY_HOLD_SECS:-240}
+        DECEL=${COMM_DECEL_SECS:-60}
+        LOCAL_HOLD2=${COMM_LOCAL_HOLD_SECS:-120}
+        PARK=${COMM_PARK_SECS:-180}
+        CYCLE=$((LOCAL_HOLD + ACCEL + HW_HOLD + DECEL + LOCAL_HOLD2 + PARK))
+        if [ -z "$vtype" ]; then VEHICLE_TYPE=$( [ $((RANDOM%2)) -eq 0 ] && echo EV || echo ICE ); else VEHICLE_TYPE=$vtype; fi
+        FUEL_LEVEL=95.0
+        BATTERY_LEVEL=95.0
+        for ((ts=$START_EPOCH; ts<=$NOW_EPOCH; ts+=$STEP_EFFECTIVE)); do
+            ELAPSED=$((ts-START_EPOCH))
+            TMOD=$((ELAPSED % CYCLE))
+            if [ $TMOD -lt $LOCAL_HOLD ]; then
+                SPEED=$LOCALK
+            elif [ $TMOD -lt $((LOCAL_HOLD + ACCEL)) ]; then
+                T=$((TMOD - LOCAL_HOLD))
+                SPEED=$(python3 - <<PY
+loc=$LOCALK
+hw=$HWK
+acc=$ACCEL
+t=$T
+print(int(loc + (hw-loc)*t/acc))
+PY
+)
+            elif [ $TMOD -lt $((LOCAL_HOLD + ACCEL + HW_HOLD)) ]; then
+                SPEED=$HWK
+            elif [ $TMOD -lt $((LOCAL_HOLD + ACCEL + HW_HOLD + DECEL)) ]; then
+                T=$((TMOD - LOCAL_HOLD - ACCEL - HW_HOLD))
+                SPEED=$(python3 - <<PY
+loc=$LOCALK
+hw=$HWK
+dec=$DECEL
+t=$T
+print(int(hw - (hw-loc)*t/dec))
+PY
+)
+            elif [ $TMOD -lt $((LOCAL_HOLD + ACCEL + HW_HOLD + DECEL + LOCAL_HOLD2)) ]; then
+                SPEED=$LOCALK
+            else
+                SPEED=0
+            fi
+            read LAT LON BEARING <<< $(python3 - <<PY
+import math,random
+base_lat=float("$BASE_LAT"); base_lon=float("$BASE_LON")
+lat=float("$LAT"); lon=float("$LON"); speed=float("$SPEED"); dt=float("$STEP_EFFECTIVE")
+bearing=float("$BEARING")
+R=6378137.0
+bearing=(bearing + (random.random()-0.5)*6.0)%360.0
+dist_m = max(0.0, speed*1000.0/3600.0*dt)
+lat_rad = math.radians(lat)
+lat2 = lat + (dist_m/R)*(180.0/math.pi)*math.cos(math.radians(bearing))
+lon2 = lon + (dist_m/R)*(180.0/math.pi)*math.sin(math.radians(bearing))/max(1e-6,math.cos(lat_rad))
+box=0.35
+if not (base_lat-box <= lat2 <= base_lat+box and base_lon-box <= lon2 <= base_lon+box):
+    bearing=(bearing+180.0)%360.0
+    lat2 = lat + (dist_m/R)*(180.0/math.pi)*math.cos(math.radians(bearing))
+    lon2 = lon + (dist_m/R)*(180.0/math.pi)*math.sin(math.radians(bearing))/max(1e-6,math.cos(lat_rad))
+print(f"{lat2:.6f} {lon2:.6f} {bearing:.2f}")
+PY
+)
+            if [ "$ENFORCE_SNAP" = "1" ]; then
+                read LAT LON <<< "$(osrm_snap "$LAT" "$LON")"
+            fi
+            # Snap evolving point to road if OSRM is available
+            if [ "$ENFORCE_SNAP" = "1" ]; then
+                read LAT LON <<< "$(osrm_snap "$LAT" "$LON")"
+            fi
+            # Energy/fuel consumption and idle refuel/recharge
+            if [ "$VEHICLE_TYPE" = "EV" ]; then
+                if [ $SPEED -gt 0 ]; then
+                    CONS=$(python3 - <<PY
+import random
+speed=$SPEED
+print(f"{max(0.02, min(0.08, speed/900.0)):.4f}")
+PY
+)
+                    BATTERY_LEVEL=$(python3 - <<PY
+lvl=$BATTERY_LEVEL
+cons=$CONS
+print(f"{max(0.0, lvl - cons):.2f}")
+PY
+)
+                else
+                    if awk "BEGIN{exit !($BATTERY_LEVEL < 35)}"; then
+                        if [ $((RANDOM % 100)) -lt 10 ]; then
+                            BATTERY_LEVEL=$(python3 - <<PY
+lvl=$BATTERY_LEVEL
+print(f"{min(100.0, lvl + 0.5):.2f}")
+PY
+)
+                        fi
+                    fi
+                fi
+            else
+                if [ $SPEED -gt 0 ]; then
+                    CONS=$(python3 - <<PY
+import random
+speed=$SPEED
+print(f"{max(0.02, min(0.10, speed/800.0)):.4f}")
+PY
+)
+                    FUEL_LEVEL=$(python3 - <<PY
+lvl=$FUEL_LEVEL
+cons=$CONS
+print(f"{max(0.0, lvl - cons):.2f}")
+PY
+)
+                else
+                    if awk "BEGIN{exit !($FUEL_LEVEL < 30)}"; then
+                        if [ $((RANDOM % 100)) -lt 10 ]; then
+                            FUEL_LEVEL=$(python3 - <<PY
+lvl=$FUEL_LEVEL
+print(f"{min(100.0, lvl + 0.6):.2f}")
+PY
+)
+                        fi
+                    fi
+                fi
+            fi
+            if [ "$VEHICLE_TYPE" = "EV" ]; then EM=0; else EM=$((SPEED/2)); fi
+            ISO_TS=$(date -u -r $ts +%Y-%m-%dT%H:%M:%SZ)
+            TELEMETRY_DATA="{\"vehicle_id\": \"$vid\", \"timestamp\": \"$ISO_TS\", \"location\": {\"lat\": $LAT, \"lon\": $LON}, \"speed\": $SPEED, \"fuel_level\": $FUEL_LEVEL, \"battery_level\": $BATTERY_LEVEL, \"emissions\": $EM, \"type\": \"$VEHICLE_TYPE\", \"status\": \"active\" }"
+            CODE=$(curl -s -m 5 -o /dev/null -w '%{http_code}' -X POST http://localhost:8081/api/telemetry \
+                -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d "$TELEMETRY_DATA")
+            TELE_ATTEMPTED=$((TELE_ATTEMPTED+1))
+            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+                TELE_POSTED=$((TELE_POSTED+1))
+            fi
+            if [ $((TELE_ATTEMPTED % 20)) -eq 0 ]; then
+                NOW_TS=$(date +%s)
+                if [ $((NOW_TS - LAST_PRINT_TS)) -ge 1 ]; then
+                    progress_print "   Commute telemetry:" "$TELE_ATTEMPTED" "$TOTAL_POINTS"
+                    LAST_PRINT_TS=$NOW_TS
+                fi
+            fi
+            if [ "$TELE_ATTEMPTED" -ge "$TOTAL_POINTS" ]; then
+                break
+            fi
+        done
+        if [ "$TELE_ATTEMPTED" -ge "$TOTAL_POINTS" ]; then
+            break
+        fi
+    done
+    progress_done "   Commute telemetry:" "$TELE_ATTEMPTED" "$TOTAL_POINTS"
+    print_status "   Commute posted: $TELE_POSTED accepted / $TELE_ATTEMPTED attempted"
+
+    # 4c) Seed historical telemetry for 24h, 7d, 30d (downsampled for performance)
+    print_status "Seeding historical telemetry (24h/7d/30d)..."
+    for WINDOW in 24h 7d 30d; do
+        case "$WINDOW" in
+            24h) DUR=$((24*3600)); STEP=${HIST_24H_STEP_SECS:-600}; MAX=${HIST_24H_MAX_POINTS:-1500} ;;
+            7d)  DUR=$((7*24*3600)); STEP=${HIST_7D_STEP_SECS:-3600}; MAX=${HIST_7D_MAX_POINTS:-2000} ;;
+            30d) DUR=$((30*24*3600)); STEP=${HIST_30D_STEP_SECS:-14400}; MAX=${HIST_30D_MAX_POINTS:-2500} ;;
+        esac
+        NOW_EPOCH=$(date -u +%s)
+        START_EPOCH=$(( NOW_EPOCH - DUR ))
+        RAW_PER_VEH=$(( DUR / STEP ))
+        if [ "$RAW_PER_VEH" -lt 1 ]; then RAW_PER_VEH=1; fi
+        TOTAL_RAW=$(( RAW_PER_VEH * ${#VEHICLE_IDS[@]} ))
+        STRIDE=1
+        STEP_EFFECTIVE=$STEP
+        TOTAL_POINTS=$TOTAL_RAW
+        if [ "$TOTAL_RAW" -gt "$MAX" ]; then
+            STRIDE=$(( (TOTAL_RAW + MAX - 1) / MAX ))
+            if [ "$STRIDE" -lt 1 ]; then STRIDE=1; fi
+            STEP_EFFECTIVE=$(( STEP * STRIDE ))
+            TOTAL_POINTS=$MAX
+        fi
+        COUNT=0
+        ATTEMPTED=0
+        progress_print "   ${WINDOW} telemetry:" "$ATTEMPTED" "$TOTAL_POINTS"
+        for idx in "${!VEHICLE_IDS[@]}"; do
+            vid=${VEHICLE_IDS[$idx]}; vtype=${VEHICLE_TYPES[$idx]}
+            CITY_INDEX=$((RANDOM % ${#CITIES[@]}))
+            CITY_COORDS="${CITIES[$CITY_INDEX]}"
+            BASE_LAT=$(echo "$CITY_COORDS" | cut -d':' -f1)
+            BASE_LON=$(echo "$CITY_COORDS" | cut -d':' -f2)
+            read LAT LON <<< $(python3 - <<PY
+import math,random
+base_lat=float("$BASE_LAT"); base_lon=float("$BASE_LON")
+R=6378137.0
+radius_m=2000.0*random.random()
+theta=2*math.pi*random.random()
+dlat=(radius_m/R)*(180.0/math.pi)
+dlon=(radius_m/(R*max(1e-6,math.cos(math.radians(base_lat)))))*(180.0/math.pi)
+lat=base_lat + dlat*math.cos(theta)
+lon=base_lon + dlon*math.sin(theta)
+print(f"{lat:.6f} {lon:.6f}")
+PY
+)
+            BEARING=$(python3 - <<PY
+import random
+print(f"{random.random()*360:.2f}")
+PY
+)
+            if [ -z "$vtype" ]; then VEHICLE_TYPE=$( [ $((RANDOM%2)) -eq 0 ] && echo EV || echo ICE ); else VEHICLE_TYPE=$vtype; fi
+            FUEL_LEVEL=$((RANDOM % 41 + 60))
+            BATTERY_LEVEL=$((RANDOM % 41 + 60))
+            LOCALK=${COMM_LOCAL_KMH:-10}; HWK=${COMM_HIGHWAY_KMH:-50}
+            LOCAL_HOLD=${COMM_LOCAL_HOLD_SECS:-180}; ACCEL=${COMM_ACCEL_SECS:-90}
+            HW_HOLD=${COMM_HIGHWAY_HOLD_SECS:-300}; DECEL=${COMM_DECEL_SECS:-90}
+            LOCAL_HOLD2=${COMM_LOCAL_HOLD_SECS:-180}; PARK=${COMM_PARK_SECS:-600}
+            CYCLE=$((LOCAL_HOLD + ACCEL + HW_HOLD + DECEL + LOCAL_HOLD2 + PARK))
+            for ((ts=$START_EPOCH; ts<=$NOW_EPOCH; ts+=$STEP_EFFECTIVE)); do
+                ELAPSED=$((ts-START_EPOCH))
+                TMOD=$((ELAPSED % CYCLE))
+                if [ $TMOD -lt $LOCAL_HOLD ]; then
+                    SPEED=$LOCALK
+                elif [ $TMOD -lt $((LOCAL_HOLD + ACCEL)) ]; then
+                    T=$((TMOD - LOCAL_HOLD))
+                    SPEED=$(python3 - <<PY
+loc=$LOCALK
+hw=$HWK
+acc=$ACCEL
+t=$T
+print(int(loc + (hw-loc)*t/acc))
+PY
+)
+                elif [ $TMOD -lt $((LOCAL_HOLD + ACCEL + HW_HOLD)) ]; then
+                    SPEED=$HWK
+                elif [ $TMOD -lt $((LOCAL_HOLD + ACCEL + HW_HOLD + DECEL)) ]; then
+                    T=$((TMOD - LOCAL_HOLD - ACCEL - HW_HOLD))
+                    SPEED=$(python3 - <<PY
+loc=$LOCALK
+hw=$HWK
+dec=$DECEL
+t=$T
+print(int(hw - (hw-loc)*t/dec))
+PY
+)
+                elif [ $TMOD -lt $((LOCAL_HOLD + ACCEL + HW_HOLD + DECEL + LOCAL_HOLD2)) ]; then
+                    SPEED=$LOCALK
+                else
+                    SPEED=0
+                fi
+                read LAT LON BEARING <<< $(python3 - <<PY
+import math,random
+base_lat=float("$BASE_LAT"); base_lon=float("$BASE_LON")
+lat=float("$LAT"); lon=float("$LON"); speed=float("$SPEED"); dt=float("$STEP_EFFECTIVE")
+bearing=float("$BEARING")
+R=6378137.0
+bearing=(bearing + (random.random()-0.5)*6.0)%360.0
+dist_m = max(0.0, speed*1000.0/3600.0*dt)
+lat_rad = math.radians(lat)
+lat2 = lat + (dist_m/R)*(180.0/math.pi)*math.cos(math.radians(bearing))
+lon2 = lon + (dist_m/R)*(180.0/math.pi)*math.sin(math.radians(bearing))/max(1e-6,math.cos(lat_rad))
+box=0.40
+if not (base_lat-box <= lat2 <= base_lat+box and base_lon-box <= lon2 <= base_lon+box):
+    bearing=(bearing+180.0)%360.0
+    lat2 = lat + (dist_m/R)*(180.0/math.pi)*math.cos(math.radians(bearing))
+    lon2 = lon + (dist_m/R)*(180.0/math.pi)*math.sin(math.radians(bearing))/max(1e-6,math.cos(lat_rad))
+print(f"{lat2:.6f} {lon2:.6f} {bearing:.2f}")
+PY
+)
+                # Energy/fuel consumption and idle refuel/recharge
+                if [ "$VEHICLE_TYPE" = "EV" ]; then
+                    if [ $SPEED -gt 0 ]; then
+                        CONS=$(python3 - <<PY
+import random
+speed=$SPEED
+print(f"{max(0.02, min(0.08, speed/900.0)):.4f}")
+PY
+)
+                        BATTERY_LEVEL=$(python3 - <<PY
+lvl=$BATTERY_LEVEL
+cons=$CONS
+print(f"{max(0.0, lvl - cons):.2f}")
+PY
+)
+                    else
+                        if awk "BEGIN{exit !($BATTERY_LEVEL < 35)}"; then
+                            if [ $((RANDOM % 100)) -lt 8 ]; then
+                                BATTERY_LEVEL=$(python3 - <<PY
+lvl=$BATTERY_LEVEL
+print(f"{min(100.0, lvl + 0.4):.2f}")
+PY
+)
+                            fi
+                        fi
+                    fi
+                else
+                    if [ $SPEED -gt 0 ]; then
+                        CONS=$(python3 - <<PY
+import random
+speed=$SPEED
+print(f"{max(0.02, min(0.10, speed/800.0)):.4f}")
+PY
+)
+                        FUEL_LEVEL=$(python3 - <<PY
+lvl=$FUEL_LEVEL
+cons=$CONS
+print(f"{max(0.0, lvl - cons):.2f}")
+PY
+)
+                    else
+                        if awk "BEGIN{exit !($FUEL_LEVEL < 30)}"; then
+                            if [ $((RANDOM % 100)) -lt 8 ]; then
+                                FUEL_LEVEL=$(python3 - <<PY
+lvl=$FUEL_LEVEL
+print(f"{min(100.0, lvl + 0.5):.2f}")
+PY
+)
+                            fi
+                        fi
+                    fi
+                fi
+                if [ "$VEHICLE_TYPE" = "EV" ]; then EM=0; else EM=$((SPEED/2)); fi
+                ISO_TS=$(date -u -r $ts +%Y-%m-%dT%H:%M:%SZ)
+                TELEMETRY_DATA="{\"vehicle_id\": \"$vid\", \"timestamp\": \"$ISO_TS\", \"location\": {\"lat\": $LAT, \"lon\": $LON}, \"speed\": $SPEED, \"fuel_level\": $FUEL_LEVEL, \"battery_level\": $BATTERY_LEVEL, \"emissions\": $EM, \"type\": \"$VEHICLE_TYPE\", \"status\": \"active\" }"
+                CODE=$(curl -s -m 5 -o /dev/null -w '%{http_code}' -X POST http://localhost:8081/api/telemetry \
+                    -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d "$TELEMETRY_DATA")
+                ATTEMPTED=$((ATTEMPTED+1))
+                if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+                    COUNT=$((COUNT+1))
+                fi
+                if [ $((ATTEMPTED % 25)) -eq 0 ]; then progress_print "   ${WINDOW} telemetry:" "$ATTEMPTED" "$TOTAL_POINTS"; fi
+                if [ "$ATTEMPTED" -ge "$TOTAL_POINTS" ]; then break; fi
+            done
+            if [ "$ATTEMPTED" -ge "$TOTAL_POINTS" ]; then break; fi
+        done
+        progress_done "   ${WINDOW} telemetry:" "$ATTEMPTED" "$TOTAL_POINTS"
+        print_status "   ${WINDOW} posted: $COUNT accepted / $ATTEMPTED attempted"
+    done
+
+    # 5) Start simulator using existing vehicles
+    export SIM_USE_EXISTING=1
+    export FLEET_SIZE=1
+    start_simulator local
+
+    # 6) Verify fresh telemetry and report count (with progress)
+    print_status "Verifying fresh telemetry (up to ~24s)..."
+    TARGET=$VEH_CREATED
+    SEEN=0
+    ATTEMPTS=0
+    MAX_ATTEMPTS=12
+    progress_print "   Verifying telemetry:" "$ATTEMPTS" "$MAX_ATTEMPTS"
+    while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+        FROM=$(date -u -v-30S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '30 seconds ago' +%Y-%m-%dT%H:%M:%SZ)
+        RESP=$(curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8081/api/telemetry?from=$FROM")
+        if command -v jq >/dev/null 2>&1; then
+            SEEN=$(echo "$RESP" | jq -r '.[].vehicle_id' | awk 'NF' | sort | uniq | wc -l | tr -d ' ')
+        else
+            SEEN=$(echo "$RESP" | grep -o '"vehicle_id":"[^\"]\{24\}"' | cut -d '"' -f4 | sort | uniq | wc -l | tr -d ' ')
+        fi
+        progress_print "   Verifying telemetry:" "$ATTEMPTS" "$MAX_ATTEMPTS"
+        echo -ne "   seen: $SEEN/$TARGET (attempt $((ATTEMPTS+1))/$MAX_ATTEMPTS)\r"
+        if [ "$SEEN" -ge "$TARGET" ]; then
+            break
+        fi
+        sleep 2
+        ATTEMPTS=$((ATTEMPTS+1))
+    done
+    progress_done "   Verifying telemetry:" "$ATTEMPTS" "$MAX_ATTEMPTS"
+    echo ""
+    echo "All moving: $SEEN vehicles"
+
+    # 7) Prune any vehicles without telemetry to keep fleet tab clean
+    print_status "Pruning vehicles without telemetry..."
+    VEH_LIST=$(curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/vehicles)
+    TO_DELETE=0
+    if command -v jq >/dev/null 2>&1; then
+        while read -r vid; do
+            [ -z "$vid" ] && continue
+            # Check if there is at least one telemetry record
+            TJSON=$(curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8081/api/telemetry?vehicle_id=$vid&limit=1&sort=desc")
+            HAS=$(echo "$TJSON" | jq -r 'length')
+            if [ "$HAS" = "0" ] || [ -z "$HAS" ]; then
+                CODE=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Bearer $TOKEN" "http://localhost:8081/api/vehicles/$vid")
+                if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then TO_DELETE=$((TO_DELETE+1)); fi
+            fi
+        done < <(echo "$VEH_LIST" | jq -r '.[]? | .id // empty')
+        if [ "$TO_DELETE" -gt 0 ]; then
+            print_status "Removed $TO_DELETE vehicles without telemetry"
+        else
+            print_status "No vehicles without telemetry found"
+        fi
+    else
+        # Fallback (less robust without jq)
+        :
+    fi
+}
+
+# Helper: snap a lat lon to nearest road via OSRM (prints "lat lon")
+osrm_snap() {
+    local lat="$1"; local lon="$2"
+    if [ -z "$OSRM_EFF_URL" ]; then echo "$lat $lon"; return 0; fi
+    local url="$OSRM_EFF_URL/nearest/v1/driving/${lon},${lat}?number=1"
+    local out=""
+    if command -v jq >/dev/null 2>&1; then
+        out=$(curl -s "$url" | jq -r 'if (.waypoints and .waypoints[0] and (.waypoints[0].location|type)=="array" and (.waypoints[0].location|length)>=2) then "\(.waypoints[0].location[1]) \(.waypoints[0].location[0])" else empty end')
+    else
+        out=$(curl -s "$url" | sed -n 's/.*\[\([-0-9.]*\),\([-0-9.]*\)\].*/\2 \1/p' | head -n1)
+    fi
+    if echo "$out" | grep -Eq '^-?[0-9]+\.?[0-9]*[[:space:]]+-?[0-9]+\.?[0-9]*$'; then
+        echo "$out"
+    else
+        echo "$lat $lon"
+    fi
+}
+
 # Main script logic
 case "${1:-}" in
     "start")
@@ -1113,6 +2173,33 @@ case "${1:-}" in
     "troubleshoot")
         troubleshooting
         ;;
+    "sim-start")
+        # Allow SIM_GLOBAL or arg 'global'
+        MODE="${2:-${SIM_GLOBAL:+global}}"
+        if [ "$MODE" = "global" ]; then
+            start_simulator global
+        else
+            start_simulator local
+        fi
+        ;;
+    "sim-stop")
+        stop_simulator
+        ;;
+    "sim-status")
+        simulator_status
+        ;;
+    "auto-fix")
+        auto_fix
+        ;;
+    "osrm-start")
+        start_local_osrm
+        ;;
+    "osrm-stop")
+        stop_local_osrm
+        ;;
+    "osrm-status")
+        osrm_status
+        ;;
     "")
         echo ""
         print_header
@@ -1129,8 +2216,16 @@ case "${1:-}" in
         echo "6) Clear database data (preserves users)"
         echo "7) Show help"
         echo "8) Troubleshoot"
+        echo "9) Start simulator (local cities)"
+        echo "10) Start simulator (global/worldwide)"
+        echo "11) Stop simulator"
+        echo "12) Simulator status"
+        echo "13) Start local OSRM"
+        echo "14) Stop local OSRM"
+        echo "15) OSRM status"
+        echo "16) Auto-fix (reset + seed + start movement)"
         echo ""
-        read -p "Enter your choice (1-8): " choice
+        read -p "Enter your choice (1-16): " choice
         
         case $choice in
             1)
@@ -1158,6 +2253,30 @@ case "${1:-}" in
                 ;;
             8)
                 troubleshooting
+                ;;
+            9)
+                start_simulator local
+                ;;
+            10)
+                start_simulator global
+                ;;
+            11)
+                stop_simulator
+                ;;
+            12)
+                simulator_status
+                ;;
+            13)
+                start_local_osrm
+                ;;
+            14)
+                stop_local_osrm
+                ;;
+            15)
+                osrm_status
+                ;;
+            16)
+                auto_fix
                 ;;
             *)
                 print_error "Invalid choice. Please run '$0 help' for options."

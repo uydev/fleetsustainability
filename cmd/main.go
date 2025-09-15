@@ -765,8 +765,9 @@ func (h *VehicleCollectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 			return
 		}
 
-		// Create vehicle model
+		// Create vehicle model with pre-assigned ID so we can return it
 		vehicle := models.Vehicle{
+			ID:              primitive.NewObjectID(),
 			Type:            vehicleInput.Type,
 			Make:            vehicleInput.Make,
 			Model:           vehicleInput.Model,
@@ -789,7 +790,7 @@ func (h *VehicleCollectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"id":      primitive.NewObjectID().Hex(),
+			"id":      vehicle.ID.Hex(),
 			"message": "Vehicle created successfully",
 		})
 

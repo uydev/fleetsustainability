@@ -36,17 +36,25 @@ const VehicleDetail: React.FC<Props> = ({ vehicles, timeRange }) => {
     apiService
       .getTelemetryByVehicle(vehicleId, { from: fromISO, to: toISO })
       .then(async (d) => {
-        if ((!d || d.length === 0) && !autoPickDone) {
-          // Try other vehicles within the SAME selected window only
+        // If no data OR data is stale (older than 2 minutes), auto-follow the freshest vehicle in range
+        const nowMs = Date.now();
+        const stale = !d || d.length === 0 || (new Date(d[d.length - 1]?.timestamp || 0).getTime() < nowMs - 2 * 60 * 1000);
+        if (stale && !autoPickDone) {
+          let best: { v: Vehicle; rows: Telemetry[] } | null = null;
           for (const v of vehicles) {
             const fb = await apiService.getTelemetryByVehicle(v.id, { from: fromISO!, to: toISO! });
             if (fb && fb.length > 0) {
-              setVehicleId(v.id);
-              setData(fb);
-              setAutoPickDone(true);
-              if (fromISO && toISO) setRangeMs({ from: new Date(fromISO).getTime(), to: new Date(toISO).getTime() });
-              return;
+              if (!best || new Date(fb[fb.length - 1].timestamp).getTime() > new Date(best.rows[best.rows.length - 1].timestamp).getTime()) {
+                best = { v, rows: fb };
+              }
             }
+          }
+          if (best) {
+            setVehicleId(best.v.id);
+            setData(best.rows);
+            setAutoPickDone(true);
+            if (fromISO && toISO) setRangeMs({ from: new Date(fromISO).getTime(), to: new Date(toISO).getTime() });
+            return;
           }
           // No data in this window for any vehicle: display empty but keep the requested window
           setData([]);
@@ -103,11 +111,13 @@ const VehicleDetail: React.FC<Props> = ({ vehicles, timeRange }) => {
       ? rows.filter((r) => typeof r.tsMs === 'number' && r.tsMs >= rangeMs.from && r.tsMs <= rangeMs.to)
       : rows;
 
-    // Bucket/aggregate for larger windows to keep charts readable
+    // Bucket/aggregate with higher resolution for short windows
     let bucketMs = 5000; // default 5s for very small ranges
     const span = spanMs ?? (filtered.length ? (filtered[filtered.length - 1].tsMs - filtered[0].tsMs) : 0);
-    if (span <= 1 * 3600 * 1000) {
-      bucketMs = 60 * 1000; // ≤1h → 1 min
+    if (span <= 15 * 60 * 1000) {
+      bucketMs = 5 * 1000; // ≤15m → 5s
+    } else if (span <= 60 * 60 * 1000) {
+      bucketMs = 30 * 1000; // ≤1h → 30s
     } else if (span <= 24 * 3600 * 1000) {
       bucketMs = 5 * 60 * 1000; // ≤24h → 5 min
     } else if (span <= 7 * 24 * 3600 * 1000) {

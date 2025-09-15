@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -68,6 +69,45 @@ var cities = []Location{
 	{Lat: -37.8136, Lon: 144.9631}, // Melbourne
 }
 
+// loadExtraCities augments the built-in city list from environment.
+// SIM_CITIES_FILE: path to JSON array of objects {"lat": number, "lon": number}
+// SIM_EXTRA_CITIES: semicolon-separated list of "lat,lon" pairs (e.g., "35.68,139.65;28.61,77.20")
+func loadExtraCities() {
+    added := 0
+    if path := os.Getenv("SIM_CITIES_FILE"); path != "" {
+        if data, err := os.ReadFile(path); err == nil {
+            var arr []struct{ Lat float64 `json:"lat"`; Lon float64 `json:"lon"` }
+            if err := json.Unmarshal(data, &arr); err == nil {
+                for _, c := range arr {
+                    if c.Lat != 0 || c.Lon != 0 {
+                        cities = append(cities, Location{Lat: c.Lat, Lon: c.Lon})
+                        added++
+                    }
+                }
+            } else {
+                log.WithError(err).Warn("Failed to parse SIM_CITIES_FILE JSON")
+            }
+        } else {
+            log.WithError(err).Warn("Failed to read SIM_CITIES_FILE")
+        }
+    }
+    if extra := os.Getenv("SIM_EXTRA_CITIES"); extra != "" {
+        for _, part := range strings.Split(extra, ";") {
+            fields := strings.Split(strings.TrimSpace(part), ",")
+            if len(fields) != 2 { continue }
+            lat, err1 := strconv.ParseFloat(strings.TrimSpace(fields[0]), 64)
+            lon, err2 := strconv.ParseFloat(strings.TrimSpace(fields[1]), 64)
+            if err1 == nil && err2 == nil {
+                cities = append(cities, Location{Lat: lat, Lon: lon})
+                added++
+            }
+        }
+    }
+    if added > 0 {
+        log.WithField("added_cities", added).Info("Loaded extra cities for simulator")
+    }
+}
+
 func jitterLocation(base Location, meters float64) Location {
 	latMetersPerDeg := 111320.0
 	lonMetersPerDeg := 111320.0 * math.Cos(base.Lat*math.Pi/180)
@@ -76,9 +116,18 @@ func jitterLocation(base Location, meters float64) Location {
 	return Location{Lat: base.Lat + dLat, Lon: base.Lon + dLon}
 }
 
+var osrmBaseURL = func() string {
+	if v := os.Getenv("OSRM_BASE_URL"); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	return "https://router.project-osrm.org"
+}()
+
+var osrmHTTPClient = &http.Client{ Timeout: 4 * time.Second }
+
 func snapToRoad(p Location) Location {
-	url := fmt.Sprintf("https://router.project-osrm.org/nearest/v1/driving/%.6f,%.6f?number=1", p.Lon, p.Lat)
-	resp, err := http.Get(url)
+	url := fmt.Sprintf("%s/nearest/v1/driving/%.6f,%.6f?number=1", osrmBaseURL, p.Lon, p.Lat)
+	resp, err := osrmHTTPClient.Get(url)
 	if err != nil {
 		return p
 	}
@@ -105,6 +154,17 @@ func snapToRoad(p Location) Location {
 }
 
 func randomLocation() Location {
+	if os.Getenv("SIM_GLOBAL") == "1" {
+		for i := 0; i < 5; i++ {
+			lat := -60 + rand.Float64()*135
+			lon := -180 + rand.Float64()*360
+			p := Location{Lat: lat, Lon: lon}
+			if os.Getenv("SIM_SNAP_TO_ROAD") == "1" {
+				p = snapToRoad(p)
+			}
+			return p
+		}
+	}
 	base := cities[rand.Intn(len(cities))]
 	j := jitterLocation(base, 500) // start close to roads
 	if os.Getenv("SIM_SNAP_TO_ROAD") == "1" {
@@ -213,6 +273,39 @@ type VehicleState struct {
 	RefillPctPerSec float64
 }
 
+// Simulation tuning (can be overridden via env vars)
+var (
+    simMaxSpeedKmh    = 60.0 // max cruising speed
+    simAccelKmhPerSec = 4.0  // acceleration cap (km/h per second)
+)
+
+// minimal shape of vehicles returned by backend
+type existingVehicle struct {
+    ID              string   `json:"id"`
+    Type            string   `json:"type"`
+    CurrentLocation Location `json:"current_location"`
+    Status          string   `json:"status"`
+}
+
+func fetchExistingVehicles(apiURL string) ([]existingVehicle, error) {
+    req, err := http.NewRequest(http.MethodGet, apiURL+"/vehicles", nil)
+    if err != nil { return nil, err }
+    if authToken != "" {
+        req.Header.Set("Authorization", "Bearer "+authToken)
+    }
+    client := &http.Client{ Timeout: 10 * time.Second }
+    resp, err := client.Do(req)
+    if err != nil { return nil, err }
+    defer resp.Body.Close()
+    if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+        return nil, fmt.Errorf("vehicles GET status %d", resp.StatusCode)
+    }
+    var rows []existingVehicle
+    dec := json.NewDecoder(resp.Body)
+    if err := dec.Decode(&rows); err != nil { return nil, err }
+    return rows, nil
+}
+
 func haversineKm(a, b Location) float64 {
 	R := 6371.0
 	dLat := (b.Lat - a.Lat) * math.Pi / 180
@@ -229,8 +322,8 @@ func lerp(a, b Location, t float64) Location {
 }
 
 func fetchOSRMRoute(start, end Location) ([]Location, error) {
-	url := fmt.Sprintf("https://router.project-osrm.org/route/v1/driving/%.6f,%.6f;%.6f,%.6f?overview=full&geometries=geojson", start.Lon, start.Lat, end.Lon, end.Lat)
-	resp, err := http.Get(url)
+	url := fmt.Sprintf("%s/route/v1/driving/%.6f,%.6f;%.6f,%.6f?overview=full&geometries=geojson", osrmBaseURL, start.Lon, start.Lat, end.Lon, end.Lat)
+	resp, err := osrmHTTPClient.Get(url)
 	if err != nil {
 		return nil, err
 	}
@@ -268,22 +361,30 @@ func fetchOSRMRoute(start, end Location) ([]Location, error) {
 
 func planNewRoute(s *VehicleState) {
 	start := snapToRoad(s.Position)
-	// pick far city
-	var end Location
-	for i := 0; i < 10; i++ {
-		cand := cities[rand.Intn(len(cities))]
-		if haversineKm(start, cand) > 50 {
-			end = snapToRoad(jitterLocation(cand, 500))
-			break
+	// Try multiple candidate endpoints, preferring nearby cities (10-60km)
+	for attempt := 0; attempt < 12; attempt++ {
+		var end Location
+		if attempt < 8 {
+			// Prefer a city within 10..60 km
+			cand := cities[rand.Intn(len(cities))]
+			d := haversineKm(start, cand)
+			if d < 10 || d > 60 {
+				continue
+			}
+			end = snapToRoad(jitterLocation(cand, 400))
+		} else {
+			// Jitter around start 5..25 km
+			radius := 5000 + rand.Float64()*20000
+			end = snapToRoad(jitterLocation(start, radius))
+		}
+		pts, err := fetchOSRMRoute(start, end)
+		if err == nil && len(pts) >= 2 {
+			s.Route = &VehicleRoute{Points: pts, SegIndex: 0, SegOffset: 0}
+			return
 		}
 	}
-	pts, err := fetchOSRMRoute(start, end)
-	if err != nil {
-		// fallback small jitter loop (snap both ends)
-		s.Route = &VehicleRoute{Points: []Location{start, snapToRoad(jitterLocation(start, 2000))}, SegIndex: 0, SegOffset: 0}
-		return
-	}
-	s.Route = &VehicleRoute{Points: pts, SegIndex: 0, SegOffset: 0}
+	// As a last resort, small snapped jitter loop
+	s.Route = &VehicleRoute{Points: []Location{start, snapToRoad(jitterLocation(start, 2000))}, SegIndex: 0, SegOffset: 0}
 }
 
 func stepAlongRoute(s *VehicleState, tickSec float64) {
@@ -370,32 +471,41 @@ func simulateVehicle(apiURL string, s *VehicleState, interval time.Duration) {
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	for range tick.C {
-		// Random stops and target speed logic
+		// Random stops and dwell logic: guarantee explicit 0-speed samples while dwelling
 		if time.Now().After(s.StopUntil) && rand.Float64() < 0.02 {
 			s.StopUntil = time.Now().Add(time.Duration(10+rand.Intn(35)) * time.Second)
 			s.TargetSpeedKmh = 0
 		}
-		if time.Now().After(s.StopUntil) && s.TargetSpeedKmh == 0 {
-			s.TargetSpeedKmh = 30 + rand.Float64()*40
-		}
-		s.TargetSpeedKmh += (rand.Float64()*2 - 1) * 1.0
-		if s.TargetSpeedKmh < 0 { s.TargetSpeedKmh = 0 }
-		if s.TargetSpeedKmh > 90 { s.TargetSpeedKmh = 90 }
-
-		// Accelerate/decelerate towards target with rate limit
-		accelKmhPerSec := 8.0
-		maxDelta := accelKmhPerSec * interval.Seconds()
-		delta := s.TargetSpeedKmh - s.SpeedKmh
-		if delta > maxDelta {
-			s.SpeedKmh += maxDelta
-		} else if delta < -maxDelta {
-			s.SpeedKmh -= maxDelta
+		if time.Now().Before(s.StopUntil) {
+			s.TargetSpeedKmh = 0
+			s.SpeedKmh = 0
 		} else {
-			s.SpeedKmh = s.TargetSpeedKmh
+			if s.TargetSpeedKmh == 0 {
+				s.TargetSpeedKmh = 20 + rand.Float64()*30
+			}
+			s.TargetSpeedKmh += (rand.Float64()*2 - 1) * 1.0
+			if s.TargetSpeedKmh < 0 { s.TargetSpeedKmh = 0 }
+			if s.TargetSpeedKmh > simMaxSpeedKmh { s.TargetSpeedKmh = simMaxSpeedKmh }
+
+			// Accelerate/decelerate towards target with rate limit
+			maxDelta := simAccelKmhPerSec * interval.Seconds()
+			delta := s.TargetSpeedKmh - s.SpeedKmh
+			if delta > maxDelta {
+				s.SpeedKmh += maxDelta
+			} else if delta < -maxDelta {
+				s.SpeedKmh -= maxDelta
+			} else {
+				s.SpeedKmh = s.TargetSpeedKmh
+			}
+			if s.SpeedKmh < 0 { s.SpeedKmh = 0 }
 		}
-		if s.SpeedKmh < 0 { s.SpeedKmh = 0 }
 
 		stepAlongRoute(s, interval.Seconds())
+
+		// Periodically re-snap to nearest road to keep alignment (lightweight correction)
+		if rand.Float64() < 0.1 {
+			s.Position = snapToRoad(s.Position)
+		}
 
 		// correlated consumption/refill
 		km := s.SpeedKmh * (interval.Seconds() / 3600.0)
@@ -441,7 +551,7 @@ func main() {
 	// Optional JWT for protected API
 	authToken = os.Getenv("SIM_AUTH_TOKEN")
 
-	fleetSize := 10
+	fleetSize := 50
 	if val := os.Getenv("FLEET_SIZE"); val != "" {
 		if n, err := strconv.Atoi(val); err == nil {
 			fleetSize = n
@@ -460,34 +570,86 @@ func main() {
 		}
 	}
 
+	// Optional tuning via env vars
+	if v := os.Getenv("SIM_MAX_SPEED_KMH"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 5 {
+			simMaxSpeedKmh = n
+		}
+	}
+	if v := os.Getenv("SIM_ACCEL_KMH_PER_S"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0.1 {
+			simAccelKmhPerSec = n
+		}
+	}
+
+	loadExtraCities()
+
 	log.WithFields(log.Fields{
 		"fleet_size": fleetSize,
 		"api_url":    apiURL,
 		"interval":   interval,
+		"osrm":       osrmBaseURL,
+		"max_kmh":    simMaxSpeedKmh,
+		"accel_kmhps": simAccelKmhPerSec,
 	}).Info("Starting fleet simulation")
 
 	// Create vehicles and states
 	states := make([]*VehicleState, 0, fleetSize)
-	for i := 0; i < fleetSize; i++ {
-		vtype := []string{"ICE", "EV"}[rand.Intn(2)]
-		vehicleID, err := createVehicle(apiURL, fmt.Sprintf("vehicle-%d", i+1), vtype)
+	useExisting := os.Getenv("SIM_USE_EXISTING") == "1"
+	if useExisting {
+		// Try to animate existing vehicles from backend
+		rows, err := fetchExistingVehicles(apiURL)
 		if err != nil {
-			log.WithError(err).Error("Failed to create vehicle")
-			continue
+			log.WithError(err).Warn("Failed to fetch existing vehicles; falling back to creating new ones")
+		} else if len(rows) > 0 {
+			log.WithField("existing_count", len(rows)).Info("Using existing vehicles for simulation")
+			for _, v := range rows {
+				vtype := v.Type
+				if vtype != "ICE" && vtype != "EV" {
+					if rand.Intn(2) == 0 { vtype = "ICE" } else { vtype = "EV" }
+				}
+				pos := v.CurrentLocation
+				if pos.Lat == 0 && pos.Lon == 0 {
+					pos = randomLocation()
+				}
+				state := &VehicleState{
+					VehicleID:        v.ID,
+					Type:             vtype,
+					Position:         pos,
+					SpeedKmh:         0,
+					TargetSpeedKmh:   30 + rand.Float64()*30,
+					FuelPct:          50 + rand.Float64()*50,
+					BatteryPct:       50 + rand.Float64()*50,
+					ConsumePctPerKm:  func() float64 { if vtype=="ICE" { return 0.08 + rand.Float64()*0.05 } ; return 0.12 + rand.Float64()*0.06 }(),
+					RefillPctPerSec:  func() float64 { if vtype=="ICE" { return 0.25 + rand.Float64()*0.20 } ; return 0.40 + rand.Float64()*0.30 }(),
+				}
+				states = append(states, state)
+			}
 		}
-		start := randomLocation()
-		state := &VehicleState{
-			VehicleID:  vehicleID,
-			Type:       vtype,
-			Position:   start,
-			SpeedKmh:   0,
-			TargetSpeedKmh: 30 + rand.Float64()*30,
-			FuelPct:    50 + rand.Float64()*50,
-			BatteryPct: 50 + rand.Float64()*50,
-			ConsumePctPerKm: func() float64 { if vtype=="ICE" { return 0.08 + rand.Float64()*0.05 } ; return 0.12 + rand.Float64()*0.06 }(),
-			RefillPctPerSec: func() float64 { if vtype=="ICE" { return 0.25 + rand.Float64()*0.20 } ; return 0.40 + rand.Float64()*0.30 }(),
+	}
+	// If not using existing or none found, create new vehicles as before
+	if len(states) == 0 {
+		for i := 0; i < fleetSize; i++ {
+			vtype := []string{"ICE", "EV"}[rand.Intn(2)]
+			vehicleID, err := createVehicle(apiURL, fmt.Sprintf("vehicle-%d", i+1), vtype)
+			if err != nil {
+				log.WithError(err).Error("Failed to create vehicle")
+				continue
+			}
+			start := randomLocation()
+			state := &VehicleState{
+				VehicleID:        vehicleID,
+				Type:             vtype,
+				Position:         start,
+				SpeedKmh:         0,
+				TargetSpeedKmh:   30 + rand.Float64()*30,
+				FuelPct:          50 + rand.Float64()*50,
+				BatteryPct:       50 + rand.Float64()*50,
+				ConsumePctPerKm:  func() float64 { if vtype=="ICE" { return 0.08 + rand.Float64()*0.05 } ; return 0.12 + rand.Float64()*0.06 }(),
+				RefillPctPerSec:  func() float64 { if vtype=="ICE" { return 0.25 + rand.Float64()*0.20 } ; return 0.40 + rand.Float64()*0.30 }(),
+			}
+			states = append(states, state)
 		}
-		states = append(states, state)
 	}
 
 	log.WithField("created_vehicles", len(states)).Info("Vehicle creation completed")
@@ -498,6 +660,8 @@ func main() {
 	}
 
 	for _, s := range states {
+		// Ensure starting point is snapped to road
+		s.Position = snapToRoad(s.Position)
 		go simulateVehicle(apiURL, s, interval)
 	}
 
