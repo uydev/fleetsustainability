@@ -2205,7 +2205,276 @@ PY
     echo ""
     echo "All moving: $SEEN vehicles"
 
-    # 7) Prune any vehicles without telemetry to keep fleet tab clean
+    # 7) Seed trips, maintenance, and costs for the vehicles
+    print_status "Seeding trips, maintenance, and costs..."
+    
+    # Get fresh vehicle list after verification
+    VEHICLE_IDS=()
+    VEHICLES_RESPONSE=$(curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/vehicles)
+    if command -v jq >/dev/null 2>&1; then
+        while IFS= read -r id; do [ -n "$id" ] && VEHICLE_IDS+=("$id"); done < <(echo "$VEHICLES_RESPONSE" | jq -r '.[]? | .id // empty')
+        if [ ${#VEHICLE_IDS[@]} -eq 0 ]; then while IFS= read -r id; do [ -n "$id" ] && VEHICLE_IDS+=("$id"); done < <(echo "$VEHICLES_RESPONSE" | jq -r '.data[]? | .id // empty'); fi
+    fi
+    if [ ${#VEHICLE_IDS[@]} -eq 0 ]; then while IFS= read -r id; do [ -n "$id" ] && VEHICLE_IDS+=("$id"); done < <(echo "$VEHICLES_RESPONSE" | grep -o '"id":"[a-f0-9]\{24\}"' | cut -d '"' -f4 | awk '!seen[$0]++'); fi
+    
+    # Seed trips (2-3 per vehicle)
+    print_status "   Creating trips..."
+    TRIP_CREATED=0
+    TRIP_TOTAL=$(( ${#VEHICLE_IDS[@]} * 3 ))
+    for vid in "${VEHICLE_IDS[@]}"; do
+        for i in {1..3}; do
+            TRIP_CREATED=$((TRIP_CREATED+1))
+            progress_print "   Trips:" "$TRIP_CREATED" "$TRIP_TOTAL"
+            
+            # Generate trip data
+            START_TIME=$(date -u -v-$((i*8))H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "$((i*8)) hours ago" +%Y-%m-%dT%H:%M:%SZ)
+            END_TIME=$(date -u -v-$((i*8-2))H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "$((i*8-2)) hours ago" +%Y-%m-%dT%H:%M:%SZ)
+            
+            # Random start/end locations
+            START_LAT=$(python3 - <<PY
+import random
+print(f"{random.uniform(40.7, 40.8):.6f}")
+PY
+)
+            START_LON=$(python3 - <<PY
+import random
+print(f"{random.uniform(-74.1, -74.0):.6f}")
+PY
+)
+            END_LAT=$(python3 - <<PY
+import random
+print(f"{random.uniform(40.7, 40.8):.6f}")
+PY
+)
+            END_LON=$(python3 - <<PY
+import random
+print(f"{random.uniform(-74.1, -74.0):.6f}")
+PY
+)
+            
+            DISTANCE=$(python3 - <<PY
+import random
+print(f"{random.uniform(5.0, 25.0):.2f}")
+PY
+)
+            DURATION=$(python3 - <<PY
+import random
+print(f"{random.uniform(0.5, 2.0):.2f}")
+PY
+)
+            FUEL_CONSUMPTION=$(python3 - <<PY
+import random
+print(f"{random.uniform(2.0, 8.0):.2f}")
+PY
+)
+            BATTERY_CONSUMPTION=$(python3 - <<PY
+import random
+print(f"{random.uniform(5.0, 15.0):.2f}")
+PY
+)
+            COST=$(python3 - <<PY
+import random
+print(f"{random.uniform(10.0, 50.0):.2f}")
+PY
+)
+            
+            PURPOSES=("business" "personal" "delivery")
+            PURPOSE=${PURPOSES[$((RANDOM % ${#PURPOSES[@]}))]}
+            
+            TRIP_DATA=$(cat <<JSON
+{
+  "vehicle_id": "$vid",
+  "driver_id": "driver_$((RANDOM % 1000))",
+  "start_location": {"lat": $START_LAT, "lon": $START_LON},
+  "end_location": {"lat": $END_LAT, "lon": $END_LON},
+  "start_time": "$START_TIME",
+  "end_time": "$END_TIME",
+  "distance": $DISTANCE,
+  "duration": $DURATION,
+  "fuel_consumption": $FUEL_CONSUMPTION,
+  "battery_consumption": $BATTERY_CONSUMPTION,
+  "cost": $COST,
+  "purpose": "$PURPOSE",
+  "status": "completed",
+  "notes": "Auto-generated trip data"
+}
+JSON
+)
+            
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8081/api/trips \
+                -H "Content-Type: application/json" \
+                -H "Authorization: Bearer $TOKEN" \
+                -d "$TRIP_DATA")
+            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+                # Success
+                :
+            fi
+        done
+    done
+    progress_done "   Trips:" "$TRIP_CREATED" "$TRIP_TOTAL"
+    
+    # Seed maintenance records (2-3 per vehicle)
+    print_status "   Creating maintenance records..."
+    MAINT_CREATED=0
+    MAINT_TOTAL=$(( ${#VEHICLE_IDS[@]} * 3 ))
+    for vid in "${VEHICLE_IDS[@]}"; do
+        for i in {1..3}; do
+            MAINT_CREATED=$((MAINT_CREATED+1))
+            progress_print "   Maintenance:" "$MAINT_CREATED" "$MAINT_TOTAL"
+            
+            # Generate maintenance data
+            SERVICE_TYPES=("oil_change" "tire_rotation" "brake_service" "battery_service" "inspection")
+            SERVICE_TYPE=${SERVICE_TYPES[$((RANDOM % ${#SERVICE_TYPES[@]}))]}
+            
+            SERVICE_DATE=$(date -u -v-$((i*30))d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "$((i*30)) days ago" +%Y-%m-%dT%H:%M:%SZ)
+            NEXT_SERVICE_DATE=$(date -u -v+$((90+i*30))d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "+$((90+i*30)) days" +%Y-%m-%dT%H:%M:%SZ)
+            
+            MILEAGE=$(python3 - <<PY
+import random
+print(f"{random.uniform(10000.0, 50000.0):.1f}")
+PY
+)
+            COST=$(python3 - <<PY
+import random
+print(f"{random.uniform(50.0, 300.0):.2f}")
+PY
+)
+            LABOR_COST=$(python3 - <<PY
+import random
+print(f"{random.uniform(20.0, 150.0):.2f}")
+PY
+)
+            PARTS_COST=$(python3 - <<PY
+import random
+print(f"{random.uniform(30.0, 200.0):.2f}")
+PY
+)
+            
+            TECHNICIANS=("John Smith" "Sarah Johnson" "Mike Wilson" "Lisa Brown" "David Davis")
+            TECHNICIAN=${TECHNICIANS[$((RANDOM % ${#TECHNICIANS[@]}))]}
+            
+            LOCATIONS=("Downtown Service Center" "Main Street Garage" "Fleet Maintenance Hub" "Auto Care Plus")
+            LOCATION=${LOCATIONS[$((RANDOM % ${#LOCATIONS[@]}))]}
+            
+            PRIORITIES=("low" "medium" "high")
+            PRIORITY=${PRIORITIES[$((RANDOM % ${#PRIORITIES[@]}))]}
+            
+            MAINT_DATA=$(cat <<JSON
+{
+  "vehicle_id": "$vid",
+  "service_type": "$SERVICE_TYPE",
+  "description": "Routine $SERVICE_TYPE service",
+  "service_date": "$SERVICE_DATE",
+  "next_service_date": "$NEXT_SERVICE_DATE",
+  "mileage": $MILEAGE,
+  "cost": $COST,
+  "labor_cost": $LABOR_COST,
+  "parts_cost": $PARTS_COST,
+  "technician": "$TECHNICIAN",
+  "service_location": "$LOCATION",
+  "status": "completed",
+  "priority": "$PRIORITY",
+  "notes": "Auto-generated maintenance record"
+}
+JSON
+)
+            
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8081/api/maintenance \
+                -H "Content-Type: application/json" \
+                -H "Authorization: Bearer $TOKEN" \
+                -d "$MAINT_DATA")
+            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+                # Success
+                :
+            fi
+        done
+    done
+    progress_done "   Maintenance:" "$MAINT_CREATED" "$MAINT_TOTAL"
+    
+    # Seed cost records (3-4 per vehicle)
+    print_status "   Creating cost records..."
+    COST_CREATED=0
+    COST_TOTAL=$(( ${#VEHICLE_IDS[@]} * 4 ))
+    for vid in "${VEHICLE_IDS[@]}"; do
+        for i in {1..4}; do
+            COST_CREATED=$((COST_CREATED+1))
+            progress_print "   Costs:" "$COST_CREATED" "$COST_TOTAL"
+            
+            # Generate cost data
+            CATEGORIES=("fuel" "maintenance" "insurance" "registration" "tolls" "parking" "other")
+            CATEGORY=${CATEGORIES[$((RANDOM % ${#CATEGORIES[@]}))]}
+            
+            COST_DATE=$(date -u -v-$((i*15))d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "$((i*15)) days ago" +%Y-%m-%dT%H:%M:%SZ)
+            
+            AMOUNT=$(python3 - <<PY
+import random
+if "$CATEGORY" == "fuel":
+    print(f"{random.uniform(30.0, 80.0):.2f}")
+elif "$CATEGORY" == "maintenance":
+    print(f"{random.uniform(50.0, 300.0):.2f}")
+elif "$CATEGORY" == "insurance":
+    print(f"{random.uniform(100.0, 200.0):.2f}")
+elif "$CATEGORY" == "registration":
+    print(f"{random.uniform(50.0, 150.0):.2f}")
+elif "$CATEGORY" == "tolls":
+    print(f"{random.uniform(5.0, 25.0):.2f}")
+elif "$CATEGORY" == "parking":
+    print(f"{random.uniform(10.0, 40.0):.2f}")
+else:
+    print(f"{random.uniform(20.0, 100.0):.2f}")
+PY
+)
+            
+            INVOICE_NUM=$(python3 - <<PY
+import random
+print(f"INV-{random.randint(10000, 99999)}")
+PY
+)
+            
+            VENDORS=("Shell" "ExxonMobil" "BP" "Chevron" "AutoZone" "NAPA" "O'Reilly" "Fleet Services Inc")
+            VENDOR=${VENDORS[$((RANDOM % ${#VENDORS[@]}))]}
+            
+            LOCATIONS=("Downtown Station" "Highway 101" "Main Street" "Fleet Depot")
+            LOCATION=${LOCATIONS[$((RANDOM % ${#LOCATIONS[@]}))]}
+            
+            PAYMENT_METHODS=("credit_card" "cash" "check" "electronic")
+            PAYMENT_METHOD=${PAYMENT_METHODS[$((RANDOM % ${#PAYMENT_METHODS[@]}))]}
+            
+            STATUSES=("pending" "paid" "disputed")
+            STATUS=${STATUSES[$((RANDOM % ${#STATUSES[@]}))]}
+            
+            COST_DATA=$(cat <<JSON
+{
+  "vehicle_id": "$vid",
+  "category": "$CATEGORY",
+  "description": "$CATEGORY expense for vehicle $vid",
+  "amount": $AMOUNT,
+  "date": "$COST_DATE",
+  "invoice_number": "$INVOICE_NUM",
+  "vendor": "$VENDOR",
+  "location": "$LOCATION",
+  "payment_method": "$PAYMENT_METHOD",
+  "status": "$STATUS",
+  "notes": "Auto-generated cost record"
+}
+JSON
+)
+            
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8081/api/costs \
+                -H "Content-Type: application/json" \
+                -H "Authorization: Bearer $TOKEN" \
+                -d "$COST_DATA")
+            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+                # Success
+                :
+            fi
+        done
+    done
+    progress_done "   Costs:" "$COST_CREATED" "$COST_TOTAL"
+    
+    print_status "   Data seeding complete: trips, maintenance, and costs created"
+
+    # 8) Prune any vehicles without telemetry to keep fleet tab clean
     print_status "Pruning vehicles without telemetry..."
     VEH_LIST=$(curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/vehicles)
     TO_DELETE=0
