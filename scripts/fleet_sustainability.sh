@@ -617,6 +617,27 @@ clear_database() {
     
     print_status "   Authentication successful"
 
+    # Clear telemetry data to prevent old data from affecting metrics
+    print_status "6. Clearing telemetry data..."
+    TELE_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/telemetry || echo 000)
+    if [ "$TELE_CODE" = "200" ] || [ "$TELE_CODE" = "204" ]; then
+        print_status "   Telemetry data cleared successfully (API)"
+    else
+        print_warning "   API delete not available (HTTP $TELE_CODE); attempting DB fallback..."
+        CLEARED=0
+        if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -q '^fleet-sustainability-mongo$'; then
+            docker exec fleet-sustainability-mongo mongosh --quiet --username root --password example --eval 'db.getSiblingDB("fleet").telemetry.deleteMany({})' >/dev/null 2>&1 && CLEARED=1
+        fi
+        if [ "$CLEARED" -ne 1 ] && command -v mongosh >/dev/null 2>&1; then
+            mongosh --quiet 'mongodb://localhost:27017' --eval 'db.getSiblingDB("fleet").telemetry.deleteMany({})' >/dev/null 2>&1 && CLEARED=1
+        fi
+        if [ "$CLEARED" -eq 1 ]; then
+            print_status "   Telemetry data cleared successfully (DB)"
+        else
+            print_warning "   Failed to clear telemetry data via DB fallback"
+        fi
+    fi
+
     # Global city centers used for seeding locations (subset to keep runtime reasonable)
     CITIES=(
         "35.6895:139.6917"   # Tokyo
@@ -627,7 +648,7 @@ clear_database() {
     )
 
     # Clear vehicles by listing and deleting individually (bulk delete not supported)
-    print_status "6. Clearing vehicles..."
+    print_status "7. Clearing vehicles..."
     LIST=$(curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/vehicles)
     IDS=()
     if command -v jq >/dev/null 2>&1; then
@@ -650,7 +671,7 @@ clear_database() {
     fi
 
     # Clear telemetry (API or DB fallback)
-    print_status "7. Clearing telemetry data..."
+    print_status "8. Clearing telemetry data..."
     TELE_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/telemetry || echo 000)
     if [ "$TELE_CODE" = "200" ] || [ "$TELE_CODE" = "204" ]; then
         print_status "   Telemetry data cleared successfully (API)"
@@ -928,6 +949,7 @@ populate_database() {
     # Create dummy vehicles - quick or full set
     print_status "3. Creating dummy vehicles..."
     VEHICLE_IDS=()
+    VEHICLE_TYPES=()
     if [ "${QUICK:-0}" = "1" ]; then
         # One EV near selected city (default NYC)
         CITY_COORDS="${CITIES[0]}"
@@ -1003,13 +1025,24 @@ PY
     done
         progress_done "   Creating vehicles:" "$CREATED" "$TOTAL_VEH"
         print_status "   Vehicles created: total=$CREATED (EV=$EV_CREATED, ICE=$ICE_CREATED)"
-        # Refresh vehicle list and extract IDs for subsequent data creation
+        # Refresh vehicle list and extract IDs and types for subsequent data creation
     VEHICLES_RESPONSE=$(curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/vehicles)
         if command -v jq >/dev/null 2>&1; then
-            while IFS= read -r id; do [ -n "$id" ] && VEHICLE_IDS+=("$id"); done < <(echo "$VEHICLES_RESPONSE" | jq -r '.[]? | .id // empty')
-            if [ ${#VEHICLE_IDS[@]} -eq 0 ]; then while IFS= read -r id; do [ -n "$id" ] && VEHICLE_IDS+=("$id"); done < <(echo "$VEHICLES_RESPONSE" | jq -r '.data[]? | .id // empty'); fi
+            while read -r id type; do
+                [ -n "$id" ] && VEHICLE_IDS+=("$id") && VEHICLE_TYPES+=("$type")
+            done < <(echo "$VEHICLES_RESPONSE" | jq -r '.[]? | "\(.id // empty) \(.type // empty)"')
+            if [ ${#VEHICLE_IDS[@]} -eq 0 ]; then 
+                while read -r id type; do [ -n "$id" ] && VEHICLE_IDS+=("$id") && VEHICLE_TYPES+=("$type"); done < <(echo "$VEHICLES_RESPONSE" | jq -r '.data[]? | "\(.id // empty) \(.type // empty)"')
+            fi
         fi
-        if [ ${#VEHICLE_IDS[@]} -eq 0 ]; then while IFS= read -r id; do [ -n "$id" ] && VEHICLE_IDS+=("$id"); done < <(echo "$VEHICLES_RESPONSE" | grep -o '"id":"[a-f0-9]\{24\}"' | cut -d '"' -f4 | awk '!seen[$0]++'); fi
+        if [ ${#VEHICLE_IDS[@]} -eq 0 ]; then 
+            # Fallback: extract both ID and type using grep/sed
+            while IFS= read -r line; do
+                id=$(echo "$line" | grep -o '"id":"[a-f0-9]\{24\}"' | cut -d '"' -f4)
+                type=$(echo "$line" | grep -o '"type":"[^"]*"' | cut -d '"' -f4)
+                [ -n "$id" ] && VEHICLE_IDS+=("$id") && VEHICLE_TYPES+=("$type")
+            done < <(echo "$VEHICLES_RESPONSE" | grep -E '"id":"[a-f0-9]{24}"' | head -10)
+        fi
         print_status "   Vehicle IDs detected: ${#VEHICLE_IDS[@]}"
     fi
 
@@ -1727,22 +1760,17 @@ auto_fix() {
         print_warning "OSRM not reachable; seed may not snap precisely to roads."
     fi
 
-    # 4) Seed vehicles: keep it fast for graphs (default 2 vehicles)
-    TARGET_VEH=${AUTOFIX_VEHICLES:-2}
-    print_status "Seeding vehicles (target: ${TARGET_VEH})..."
-    CITIES=(
-        "35.6895:139.6917"   # Tokyo
-        "28.6139:77.2090"    # Delhi
-        "31.2304:121.4737"   # Shanghai
-        "40.7128:-74.0060"   # New York
-        "-23.5505:-46.6333"  # São Paulo
-    )
+    # 4) Seed vehicles: exactly 1 ICE and 1 EV
+    print_status "Seeding vehicles (1 ICE, 1 EV)..."
+    
+    # Use NYC area for both vehicles
+    BASE_LAT="40.7128"
+    BASE_LON="-74.0060"
+    
     VEH_CREATED=0
-    for CITY in "${CITIES[@]}"; do
-        BASE_LAT=${CITY%%:*}
-        BASE_LON=${CITY##*:}
-        for i in 1 2 3; do
-            read V_LAT V_LON <<< $(python3 - <<PY
+    
+    # Create 1 ICE vehicle
+    read V_LAT V_LON <<< $(python3 - <<PY
 import math,random
 base_lat=float("$BASE_LAT"); base_lon=float("$BASE_LON")
 R=6378137.0
@@ -1755,23 +1783,45 @@ lon=base_lon + dlon*math.sin(theta)
 print(f"{lat:.6f} {lon:.6f}")
 PY
 )
-            # Alternate ICE/EV for diversity
-            if [ $(((VEH_CREATED+i)%2)) -eq 0 ]; then VTYPE="EV"; else VTYPE="ICE"; fi
-            VEHICLE_BODY=$(cat <<JSON
-{"type":"$VTYPE","make":"Auto","model":"Seed","year":2023,"status":"active","current_location":{"lat":$V_LAT,"lon":$V_LON}}
+    VEHICLE_BODY=$(cat <<JSON
+{"type":"ICE","make":"Toyota","model":"Camry","year":2023,"status":"active","current_location":{"lat":$V_LAT,"lon":$V_LON}}
 JSON
 )
-            CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8081/api/vehicles \
-                -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
-                -d "$VEHICLE_BODY")
-            if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
-                VEH_CREATED=$((VEH_CREATED+1))
-            fi
-            if [ "$VEH_CREATED" -ge "$TARGET_VEH" ]; then break; fi
-        done
-        if [ "$VEH_CREATED" -ge "$TARGET_VEH" ]; then break; fi
-    done
-    print_status "Vehicles created: $VEH_CREATED"
+    CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8081/api/vehicles \
+        -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+        -d "$VEHICLE_BODY")
+    if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+        VEH_CREATED=$((VEH_CREATED+1))
+        print_status "ICE vehicle created"
+    fi
+    
+    # Create 1 EV vehicle
+    read V_LAT V_LON <<< $(python3 - <<PY
+import math,random
+base_lat=float("$BASE_LAT"); base_lon=float("$BASE_LON")
+R=6378137.0
+radius_m=1500.0*random.random()
+theta=2*math.pi*random.random()
+dlat=(radius_m/R)*(180.0/math.pi)
+dlon=(radius_m/(R*max(1e-6,math.cos(math.radians(base_lat)))))*(180.0/math.pi)
+lat=base_lat + dlat*math.cos(theta)
+lon=base_lon + dlon*math.sin(theta)
+print(f"{lat:.6f} {lon:.6f}")
+PY
+)
+    VEHICLE_BODY=$(cat <<JSON
+{"type":"EV","make":"Tesla","model":"Model 3","year":2023,"status":"active","current_location":{"lat":$V_LAT,"lon":$V_LON}}
+JSON
+)
+    CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8081/api/vehicles \
+        -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+        -d "$VEHICLE_BODY")
+    if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+        VEH_CREATED=$((VEH_CREATED+1))
+        print_status "EV vehicle created"
+    fi
+    
+    print_status "Vehicles created: $VEH_CREATED (1 ICE, 1 EV)"
 
     # 4b) Seed commute-style telemetry to make graphs immediately useful
     print_status "Seeding commute-style telemetry for graphs..."
@@ -1786,7 +1836,14 @@ JSON
             while read -r id type; do [ -n "$id" ] && VEHICLE_IDS+=("$id") && VEHICLE_TYPES+=("$type"); done < <(echo "$VEHICLES_RESPONSE" | jq -r '.data[]? | "\(.id // empty) \(.type // empty)"')
         fi
     fi
-    if [ ${#VEHICLE_IDS[@]} -eq 0 ]; then while IFS= read -r id; do [ -n "$id" ] && VEHICLE_IDS+=("$id"); done < <(echo "$VEHICLES_RESPONSE" | grep -o '"id":"[a-f0-9]\{24\}"' | cut -d '"' -f4 | awk '!seen[$0]++'); fi
+    if [ ${#VEHICLE_IDS[@]} -eq 0 ]; then 
+        # Fallback: extract both ID and type using grep/sed
+        while IFS= read -r line; do
+            id=$(echo "$line" | grep -o '"id":"[a-f0-9]\{24\}"' | cut -d '"' -f4)
+            type=$(echo "$line" | grep -o '"type":"[^"]*"' | cut -d '"' -f4)
+            [ -n "$id" ] && VEHICLE_IDS+=("$id") && VEHICLE_TYPES+=("$type")
+        done < <(echo "$VEHICLES_RESPONSE" | grep -E '"id":"[a-f0-9]{24}"' | head -10)
+    fi
     NOW_EPOCH=$(date -u +%s)
     START_EPOCH=$(( NOW_EPOCH - 1800 ))
     STEP_SECONDS=30
@@ -2210,12 +2267,24 @@ PY
     
     # Get fresh vehicle list after verification
     VEHICLE_IDS=()
+    VEHICLE_TYPES=()
     VEHICLES_RESPONSE=$(curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/vehicles)
     if command -v jq >/dev/null 2>&1; then
-        while IFS= read -r id; do [ -n "$id" ] && VEHICLE_IDS+=("$id"); done < <(echo "$VEHICLES_RESPONSE" | jq -r '.[]? | .id // empty')
-        if [ ${#VEHICLE_IDS[@]} -eq 0 ]; then while IFS= read -r id; do [ -n "$id" ] && VEHICLE_IDS+=("$id"); done < <(echo "$VEHICLES_RESPONSE" | jq -r '.data[]? | .id // empty'); fi
+        while read -r id type; do
+            [ -n "$id" ] && VEHICLE_IDS+=("$id") && VEHICLE_TYPES+=("$type")
+        done < <(echo "$VEHICLES_RESPONSE" | jq -r '.[]? | "\(.id // empty) \(.type // empty)"')
+        if [ ${#VEHICLE_IDS[@]} -eq 0 ]; then 
+            while read -r id type; do [ -n "$id" ] && VEHICLE_IDS+=("$id") && VEHICLE_TYPES+=("$type"); done < <(echo "$VEHICLES_RESPONSE" | jq -r '.data[]? | "\(.id // empty) \(.type // empty)"')
+        fi
     fi
-    if [ ${#VEHICLE_IDS[@]} -eq 0 ]; then while IFS= read -r id; do [ -n "$id" ] && VEHICLE_IDS+=("$id"); done < <(echo "$VEHICLES_RESPONSE" | grep -o '"id":"[a-f0-9]\{24\}"' | cut -d '"' -f4 | awk '!seen[$0]++'); fi
+    if [ ${#VEHICLE_IDS[@]} -eq 0 ]; then 
+        # Fallback: extract both ID and type using grep/sed
+        while IFS= read -r line; do
+            id=$(echo "$line" | grep -o '"id":"[a-f0-9]\{24\}"' | cut -d '"' -f4)
+            type=$(echo "$line" | grep -o '"type":"[^"]*"' | cut -d '"' -f4)
+            [ -n "$id" ] && VEHICLE_IDS+=("$id") && VEHICLE_TYPES+=("$type")
+        done < <(echo "$VEHICLES_RESPONSE" | grep -E '"id":"[a-f0-9]{24}"' | head -10)
+    fi
     
     # Seed trips (2-3 per vehicle)
     print_status "   Creating trips..."
