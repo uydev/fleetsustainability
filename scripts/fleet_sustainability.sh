@@ -150,9 +150,10 @@ troubleshooting() {
         echo "1) Free ports (8080, 8081, 8082, 3000)"
         echo "2) Check Docker containers"
         echo "3) Check application logs"
-        echo "4) Back to main menu"
+        echo "4) Auto-fix (reset + seed + start movement)"
+        echo "5) Back to main menu"
         echo ""
-        read -p "Enter your choice (1-4): " choice
+        read -p "Enter your choice (1-5): " choice
         
         case $choice in
             1)
@@ -186,6 +187,98 @@ troubleshooting() {
             3)
                 print_header
                 check_application_logs
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
+            4)
+                print_header
+                auto_fix
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
+            5)
+                break
+                ;;
+            *)
+                print_error "Invalid choice. Please enter 1-5."
+                sleep 2
+                ;;
+        esac
+    done
+}
+
+# Simulator submenu
+simulator_menu() {
+    while true; do
+        print_header
+        echo ""
+        echo "🛰️ Simulator Menu"
+        echo ""
+        echo "1) Start simulator (local cities)"
+        echo "2) Start simulator (global/worldwide)"
+        echo "3) Stop simulator"
+        echo "4) Simulator status"
+        echo "5) Back to main menu"
+        echo ""
+        read -p "Enter your choice (1-5): " choice
+        case $choice in
+            1)
+                start_simulator local
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
+            2)
+                start_simulator global
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
+            3)
+                stop_simulator
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
+            4)
+                simulator_status
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
+            5)
+                break
+                ;;
+            *)
+                print_error "Invalid choice. Please enter 1-5."
+                sleep 2
+                ;;
+        esac
+    done
+}
+
+# OSRM submenu
+osrm_menu() {
+    while true; do
+        print_header
+        echo ""
+        echo "🗺️ OSRM Menu"
+        echo ""
+        echo "1) Start local OSRM"
+        echo "2) Stop local OSRM"
+        echo "3) OSRM status"
+        echo "4) Back to main menu"
+        echo ""
+        read -p "Enter your choice (1-4): " choice
+        case $choice in
+            1)
+                start_local_osrm
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
+            2)
+                stop_local_osrm
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
+            3)
+                osrm_status
                 echo ""
                 read -p "Press Enter to continue..."
                 ;;
@@ -2215,17 +2308,11 @@ case "${1:-}" in
         echo "5) Populate database with dummy data"
         echo "6) Clear database data (preserves users)"
         echo "7) Show help"
-        echo "8) Troubleshoot"
-        echo "9) Start simulator (local cities)"
-        echo "10) Start simulator (global/worldwide)"
-        echo "11) Stop simulator"
-        echo "12) Simulator status"
-        echo "13) Start local OSRM"
-        echo "14) Stop local OSRM"
-        echo "15) OSRM status"
-        echo "16) Auto-fix (reset + seed + start movement)"
+        echo "8) Simulator"
+        echo "9) OSRM"
+        echo "10) Troubleshoot"
         echo ""
-        read -p "Enter your choice (1-16): " choice
+        read -p "Enter your choice (1-10): " choice
         
         case $choice in
             1)
@@ -2252,31 +2339,13 @@ case "${1:-}" in
                 show_help
                 ;;
             8)
-                troubleshooting
+                simulator_menu
                 ;;
             9)
-                start_simulator local
+                osrm_menu
                 ;;
             10)
-                start_simulator global
-                ;;
-            11)
-                stop_simulator
-                ;;
-            12)
-                simulator_status
-                ;;
-            13)
-                start_local_osrm
-                ;;
-            14)
-                stop_local_osrm
-                ;;
-            15)
-                osrm_status
-                ;;
-            16)
-                auto_fix
+                troubleshooting
                 ;;
             *)
                 print_error "Invalid choice. Please run '$0 help' for options."
