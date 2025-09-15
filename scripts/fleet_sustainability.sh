@@ -21,6 +21,9 @@ print_error() {
 }
 
 print_header() {
+    if [ -t 1 ]; then
+        clear 2>/dev/null || printf "\033c"
+    fi
     echo -e "${BLUE}================================${NC}"
     echo -e "${BLUE}  Fleet Sustainability Manager${NC}"
     echo -e "${BLUE}================================${NC}"
@@ -512,6 +515,10 @@ show_status() {
     osrm_status
 
     echo ""
+    # Pause in interactive sessions so the screen doesn't clear immediately
+    if [ -t 0 ]; then
+        read -p "Press Enter to go back..." </dev/tty
+    fi
 }
 
 # Function to show help
@@ -543,6 +550,10 @@ show_help() {
     echo "  $0 sim-start global          # force global spawn + public OSRM"
     echo "  OSRM_BASE_URL=https://router.project-osrm.org SIM_GLOBAL=1 $0 sim-start"
     echo ""
+    # Pause in interactive sessions so the screen doesn't clear immediately
+    if [ -t 0 ]; then
+        read -p "Press Enter to go back..." </dev/tty
+    fi
 }
 
 # Function to clear database data (safe tables only)
@@ -2294,64 +2305,66 @@ case "${1:-}" in
         osrm_status
         ;;
     "")
-        echo ""
-        print_header
-        echo ""
-        echo "Welcome to Fleet Sustainability Manager!"
-        echo ""
-        echo "What would you like to do?"
-        echo ""
-        echo "1) Start the application"
-        echo "2) Stop the application"
-        echo "3) Check status"
-        echo "4) Restart the application"
-        echo "5) Populate database with dummy data"
-        echo "6) Clear database data (preserves users)"
-        echo "7) Show help"
-        echo "8) Simulator"
-        echo "9) OSRM"
-        echo "10) Troubleshoot"
-        echo ""
-        read -p "Enter your choice (1-10): " choice
-        
-        case $choice in
-            1)
-                start_fleet_sustainability
-                ;;
-            2)
-                stop_fleet_sustainability
-                ;;
-            3)
-                show_status
-                ;;
-            4)
-                stop_fleet_sustainability
-                sleep 2
-                start_fleet_sustainability
-                ;;
-            5)
-                populate_database
-                ;;
-            6)
-                clear_database
-                ;;
-            7)
-                show_help
-                ;;
-            8)
-                simulator_menu
-                ;;
-            9)
-                osrm_menu
-                ;;
-            10)
-                troubleshooting
-                ;;
-            *)
-                print_error "Invalid choice. Please run '$0 help' for options."
-                exit 1
-                ;;
-        esac
+        while true; do
+            echo ""
+            print_header
+            echo ""
+            echo "Welcome to Fleet Sustainability Manager!"
+            echo ""
+            echo "What would you like to do?"
+            echo ""
+            echo "1) Start the application"
+            echo "2) Stop the application"
+            echo "3) Check status"
+            echo "4) Restart the application"
+            echo "5) Populate database with dummy data"
+            echo "6) Clear database data (preserves users)"
+            echo "7) Show help"
+            echo "8) Simulator"
+            echo "9) OSRM"
+            echo "10) Troubleshoot"
+            echo ""
+            read -p "Enter your choice (1-10): " choice
+
+            case $choice in
+                1)
+                    start_fleet_sustainability
+                    ;;
+                2)
+                    stop_fleet_sustainability
+                    ;;
+                3)
+                    show_status
+                    ;;
+                4)
+                    stop_fleet_sustainability
+                    sleep 2
+                    start_fleet_sustainability
+                    ;;
+                5)
+                    populate_database
+                    ;;
+                6)
+                    clear_database
+                    ;;
+                7)
+                    show_help
+                    ;;
+                8)
+                    simulator_menu
+                    ;;
+                9)
+                    osrm_menu
+                    ;;
+                10)
+                    troubleshooting
+                    ;;
+                *)
+                    print_error "Invalid choice. Please run '$0 help' for options."
+                    sleep 2
+                    ;;
+            esac
+        done
         ;;
     *)
         print_error "Unknown option: $1"
