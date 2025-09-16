@@ -310,9 +310,16 @@ const VehicleDetail: React.FC<Props> = ({ vehicles, timeRange, selectedVehicleId
   };
 
   return (
-    <Paper sx={{ p: 2 }}>
-      <Box display="flex" alignItems="center" gap={2} mb={2}>
-        <FormControl size="small">
+    <Paper sx={{ p: { xs: 1.5, sm: 2 } }}>
+      <Box 
+        display="flex" 
+        alignItems="center" 
+        gap={2} 
+        mb={2}
+        flexDirection={{ xs: 'column', sm: 'row' }}
+        sx={{ '& > *': { width: { xs: '100%', sm: 'auto' } } }}
+      >
+        <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: '200px' } }}>
           <InputLabel id="veh-label">Vehicle</InputLabel>
           <Select
             labelId="veh-label"
@@ -327,18 +334,45 @@ const VehicleDetail: React.FC<Props> = ({ vehicles, timeRange, selectedVehicleId
             ))}
           </Select>
         </FormControl>
-        <Button variant="outlined" onClick={exportCsv}>
-          Export CSV
-        </Button>
-        <Button variant="outlined" onClick={exportPdf} sx={{ ml: 1 }}>
-          Export PDF
-        </Button>
+        <Box display="flex" gap={1} width={{ xs: '100%', sm: 'auto' }}>
+          <Button 
+            variant="outlined" 
+            onClick={exportCsv}
+            size="small"
+            sx={{ flex: { xs: 1, sm: 'none' } }}
+          >
+            <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+              Export CSV
+            </Box>
+            <Box component="span" sx={{ display: { xs: 'inline', sm: 'none' } }}>
+              CSV
+            </Box>
+          </Button>
+          <Button 
+            variant="outlined" 
+            onClick={exportPdf}
+            size="small"
+            sx={{ flex: { xs: 1, sm: 'none' } }}
+          >
+            <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+              Export PDF
+            </Box>
+            <Box component="span" sx={{ display: { xs: 'inline', sm: 'none' } }}>
+              PDF
+            </Box>
+          </Button>
+        </Box>
       </Box>
 
-      <Typography variant="subtitle1" gutterBottom>
-        Speed & Emissions ({rangeMs ? `${new Date(rangeMs.from).toLocaleString()} → ${new Date(rangeMs.to).toLocaleString()}` : (timeRange?.from || timeRange?.to ? 'filtered' : 'last 24h')})
+      <Typography variant="subtitle1" gutterBottom sx={{ fontSize: { xs: '0.875rem', sm: '1rem' } }}>
+        <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+          Speed & Emissions ({rangeMs ? `${new Date(rangeMs.from).toLocaleString()} → ${new Date(rangeMs.to).toLocaleString()}` : (timeRange?.from || timeRange?.to ? 'filtered' : 'last 24h')})
+        </Box>
+        <Box component="span" sx={{ display: { xs: 'inline', sm: 'none' } }}>
+          Speed & Emissions
+        </Box>
       </Typography>
-      <Box sx={{ width: '100%', height: 280 }}>
+      <Box sx={{ width: '100%', height: { xs: 250, sm: 280 } }}>
         <ResponsiveContainer>
           <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" />

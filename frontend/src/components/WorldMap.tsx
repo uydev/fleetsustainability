@@ -450,38 +450,68 @@ const WorldMap = forwardRef<WorldMapRef, WorldMapProps>(({ telemetry, onNavigate
               markersRef={markersRef}
             >
               <Popup>
-                <div style={{ minWidth: '200px' }}>
-                  <h3 style={{ margin: '0 0 10px 0', color: vehicleType === 'EV' ? '#4CAF50' : '#FF9800' }}>
+                <div style={{ 
+                  minWidth: '200px',
+                  maxWidth: '280px',
+                  fontSize: '14px'
+                }}>
+                  <h3 style={{ 
+                    margin: '0 0 10px 0', 
+                    color: vehicleType === 'EV' ? '#4CAF50' : '#FF9800',
+                    fontSize: '16px',
+                    fontWeight: 'bold'
+                  }}>
                     🚗 Vehicle {vehicle.vehicle_id}
                   </h3>
-                  <p><strong>Type:</strong> {vehicleType}</p>
-                  <p><strong>Speed:</strong> {format1(vehicle.speed)} km/h</p>
-                  <p><strong>Status:</strong> {vehicle.status}</p>
+                  <p style={{ margin: '4px 0', fontSize: '13px' }}>
+                    <strong>Type:</strong> {vehicleType}
+                  </p>
+                  <p style={{ margin: '4px 0', fontSize: '13px' }}>
+                    <strong>Speed:</strong> {format1(vehicle.speed)} km/h
+                  </p>
+                  <p style={{ margin: '4px 0', fontSize: '13px' }}>
+                    <strong>Status:</strong> {vehicle.status}
+                  </p>
                   {vehicleType === 'EV' ? (
                     <>
-                      <p><strong>Battery:</strong> {format0(vehicle.battery_level)}%</p>
-                      <p><strong>Emissions:</strong> {format1(vehicle.emissions)} g/km</p>
+                      <p style={{ margin: '4px 0', fontSize: '13px' }}>
+                        <strong>Battery:</strong> {format0(vehicle.battery_level)}%
+                      </p>
+                      <p style={{ margin: '4px 0', fontSize: '13px' }}>
+                        <strong>Emissions:</strong> {format1(vehicle.emissions)} g/km
+                      </p>
                     </>
                   ) : (
                     <>
-                      <p><strong>Fuel:</strong> {format0(vehicle.fuel_level)}%</p>
-                      <p><strong>Emissions:</strong> {format1(vehicle.emissions)} g/km</p>
+                      <p style={{ margin: '4px 0', fontSize: '13px' }}>
+                        <strong>Fuel:</strong> {format0(vehicle.fuel_level)}%
+                      </p>
+                      <p style={{ margin: '4px 0', fontSize: '13px' }}>
+                        <strong>Emissions:</strong> {format1(vehicle.emissions)} g/km
+                      </p>
                     </>
                   )}
-                  <p><strong>Location:</strong> {vehicle.location.lat.toFixed(4)}, {vehicle.location.lon.toFixed(4)}</p>
+                  <p style={{ margin: '4px 0', fontSize: '12px', color: '#666' }}>
+                    <strong>Location:</strong> {vehicle.location.lat.toFixed(4)}, {vehicle.location.lon.toFixed(4)}
+                  </p>
                   {onNavigateToVehicleDetail && (
-                    <p style={{ marginTop: '10px' }}>
+                    <p style={{ marginTop: '12px', textAlign: 'center' }}>
                       <button 
                         onClick={() => onNavigateToVehicleDetail(vehicle.vehicle_id)}
                         style={{
                           background: '#1976d2',
                           color: 'white',
                           border: 'none',
-                          padding: '8px 16px',
-                          borderRadius: '4px',
+                          padding: '10px 20px',
+                          borderRadius: '6px',
                           cursor: 'pointer',
-                          fontSize: '14px'
+                          fontSize: '14px',
+                          fontWeight: '500',
+                          width: '100%',
+                          transition: 'background-color 0.2s'
                         }}
+                        onMouseOver={(e) => (e.target as HTMLButtonElement).style.background = '#1565c0'}
+                        onMouseOut={(e) => (e.target as HTMLButtonElement).style.background = '#1976d2'}
                       >
                         View Details
                       </button>

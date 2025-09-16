@@ -29,6 +29,7 @@ import TripManagement from './TripManagement';
 import MaintenanceManagement from './MaintenanceManagement';
 import CostManagement from './CostManagement';
 import LiveView from './LiveView';
+import ElectrificationPlanning from './ElectrificationPlanning';
 import apiService from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { Telemetry, FleetMetrics, Vehicle } from '../types';
@@ -257,12 +258,31 @@ const Dashboard: React.FC = () => {
           </Box>
         </Toolbar>
       </AppBar>
-      <Container maxWidth="xl" sx={{ py: 4 }}>
+      <Container maxWidth="xl" sx={{ py: { xs: 2, sm: 3, md: 4 }, px: { xs: 1, sm: 2 } }}>
 
       <TimeRangeSelector onTimeRangeChange={handleTimeRangeChange} />
 
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
-        <Tabs value={tabValue} onChange={handleTabChange} aria-label="dashboard tabs">
+        <Tabs 
+          value={tabValue} 
+          onChange={handleTabChange} 
+          aria-label="dashboard tabs"
+          variant="scrollable"
+          scrollButtons="auto"
+          allowScrollButtonsMobile
+          sx={{
+            '& .MuiTab-root': {
+              minWidth: 'auto',
+              px: 1.5,
+              fontSize: '0.875rem',
+            },
+            '& .MuiTabs-scrollButtons': {
+              '&.Mui-disabled': {
+                opacity: 0.3,
+              },
+            },
+          }}
+        >
           <Tab label="Fleet Overview" />
           <Tab label="Live View" />
           <Tab label="Vehicle Detail" />
@@ -272,20 +292,21 @@ const Dashboard: React.FC = () => {
           <Tab label="Trip Management" />
           <Tab label="Cost Management" />
           <Tab label="Maintenance" />
+          <Tab label="Electrification" />
         </Tabs>
       </Box>
 
       <TabPanel value={tabValue} index={0}>
-        <Grid container spacing={3}>
+        <Grid container spacing={{ xs: 2, sm: 3 }}>
           <Grid item xs={12} lg={8}>
-            <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <Paper sx={{ p: { xs: 1, sm: 2 }, height: { xs: '400px', sm: '500px', md: '100%' }, display: 'flex', flexDirection: 'column' }}>
               <Box sx={{ flex: 1, minHeight: 0 }}>
                 <WorldMap ref={worldMapRef} telemetry={overviewTelemetry} />
               </Box>
             </Paper>
           </Grid>
           <Grid item xs={12} lg={4}>
-            <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <Paper sx={{ p: { xs: 1, sm: 2 }, height: { xs: 'auto', lg: '100%' }, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               <Box sx={{ flex: 1, overflow: 'auto' }}>
                 <MetricsPanel metrics={metrics} />
                 <Box mt={2}>
@@ -349,6 +370,10 @@ const Dashboard: React.FC = () => {
 
       <TabPanel value={tabValue} index={8}>
         <MaintenanceManagement timeRange={currentTimeRange} />
+      </TabPanel>
+
+      <TabPanel value={tabValue} index={9}>
+        <ElectrificationPlanning vehicles={vehicles} timeRange={currentTimeRange} />
       </TabPanel>
     </Container>
     </>
