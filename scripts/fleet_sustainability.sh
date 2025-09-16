@@ -110,7 +110,7 @@ check_docker_containers() {
     
     echo ""
     print_status "Docker compose status:"
-    cd "$(dirname "$0")/.."
+    cd "$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")/.."
     docker-compose ps
 }
 
@@ -119,7 +119,7 @@ check_application_logs() {
     print_status "Checking application logs..."
     echo ""
     
-    cd "$(dirname "$0")/.."
+    cd "$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")/.."
     
     # Check Docker container logs
     print_status "Backend container logs (last 20 lines):"
@@ -310,7 +310,7 @@ start_fleet_sustainability() {
 
     # Start all services with Docker Compose
     print_status "1. Starting all services with Docker Compose..."
-    cd "$(dirname "$0")/.."
+    cd "$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")/.."
     docker-compose up -d
     if [ $? -eq 0 ]; then
         print_status "   Docker services started successfully"
@@ -323,10 +323,9 @@ start_fleet_sustainability() {
     print_status "2. Waiting for services to be ready..."
     sleep 10
 
-    # Optionally start local OSRM if requested
-    if [ "${RUN_LOCAL_OSRM:-0}" = "1" ]; then
-        start_local_osrm || print_warning "Local OSRM could not be started."
-    fi
+    # Start local OSRM
+    print_status "5. Starting local OSRM..."
+    start_local_osrm || print_warning "Local OSRM could not be started."
 
     # Check if backend container is running
     print_status "3. Checking backend container..."
@@ -364,6 +363,7 @@ start_fleet_sustainability() {
     kill_port 3000
     
     # Start frontend in background
+    cd "$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")/.."
     cd frontend
     npm start > frontend.log 2>&1 &
     FRONTEND_PID=$!
@@ -384,6 +384,7 @@ start_fleet_sustainability() {
     fi
 
     # Save frontend PID to file for later cleanup
+    cd "$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")/.."
     echo "$FRONTEND_PID" > .frontend_pid
 
     # Test the application
@@ -450,13 +451,17 @@ stop_fleet_sustainability() {
 
     # Stop Docker containers
     print_status "2. Stopping Docker containers..."
-    cd "$(dirname "$0")/.."
+    cd "$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")/.."
     docker-compose down
     print_status "   Docker containers stopped"
 
+    # Stop local OSRM
+    print_status "3. Stopping local OSRM..."
+    stop_local_osrm
+
     # Clean up log files
-    print_status "3. Cleaning up..."
-    rm -f backend.log frontend.log 2>/dev/null
+    print_status "4. Cleaning up..."
+    rm -f backend.log frontend/frontend.log 2>/dev/null
 
     echo ""
     print_status "✅ Fleet Sustainability stopped successfully!"
@@ -487,6 +492,12 @@ show_status() {
         print_status "✅ Mongo Express: Running (Docker container)"
     else
         print_warning "❌ Mongo Express: Not running (Docker container)"
+    fi
+
+    if docker ps | grep -q "fleet-osrm"; then
+        print_status "✅ OSRM: Running (Docker container)"
+    else
+        print_warning "❌ OSRM: Not running (Docker container)"
     fi
 
     # Check frontend
@@ -1512,6 +1523,18 @@ start_simulator() {
     print_status "Starting simulator (vehicles will move on the map)..."
     echo ""
 
+    # Handle parameters
+    MODE="${1:-local}"
+    if [ "$MODE" = "global" ]; then
+        SIM_GLOBAL=1
+        # Force global OSRM unless explicitly overridden by user
+        OSRM_URL="${OSRM_BASE_URL:-https://router.project-osrm.org}"
+    else
+        : "${SIM_GLOBAL:=0}"
+        # Respect any existing OSRM_BASE_URL (e.g., local Monaco)
+        OSRM_URL="${OSRM_BASE_URL}"
+    fi
+
     # Ensure backend is up
     if ! curl -s http://localhost:8081 > /dev/null 2>&1; then
         print_error "Backend is not running. Run: $0 start"
@@ -1537,26 +1560,89 @@ start_simulator() {
     : "${FLEET_SIZE:=1}"
     : "${SIM_TICK_SECONDS:=1}"
     : "${SIM_SNAP_TO_ROAD:=1}"
-    MODE="${1:-local}"
-    if [ "$MODE" = "global" ]; then
-        SIM_GLOBAL=1
-        # Force global OSRM unless explicitly overridden by user
-        OSRM_URL="${OSRM_BASE_URL:-https://router.project-osrm.org}"
-    else
-        : "${SIM_GLOBAL:=0}"
-        # Respect any existing OSRM_BASE_URL (e.g., local Monaco)
-        OSRM_URL="${OSRM_BASE_URL}"
-    fi
 
-    # Stop any running simulator first
+    # Stop any running simulator first and clean up
     stop_simulator >/dev/null 2>&1 || true
+    
+    # Additional cleanup - kill any remaining simulator processes
+    pkill -f './simulator' >/dev/null 2>&1 || true
+    pkill -f 'go run ./cmd/simulator' >/dev/null 2>&1 || true
+    
+    # Clean up any stale PID files
+    rm -f .simulator_pid /tmp/fleet_simulator_pid 2>/dev/null || true
 
-    # Choose binary or go run
-    cd "$(dirname "$0")/.."
+    # Choose binary or go run - ensure we're in the correct project directory
+    SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")"
+    PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+    
+    # Fallback to known project path if path resolution fails
+    if [ ! -f "$PROJECT_DIR/go.mod" ]; then
+        KNOWN_PROJECT_DIR="/Users/yilmazu/Projects/hephaestus-sytems/Fleet-Sustainability"
+        if [ -f "$KNOWN_PROJECT_DIR/go.mod" ]; then
+            print_status "Using known project directory: $KNOWN_PROJECT_DIR"
+            PROJECT_DIR="$KNOWN_PROJECT_DIR"
+        fi
+    fi
+    
+    print_status "Script directory: $SCRIPT_DIR"
+    print_status "Project directory: $PROJECT_DIR"
+    
+    cd "$PROJECT_DIR"
+    
+    # Ensure we have write permissions in the current directory
+    if ! touch test_write_permission 2>/dev/null; then
+        print_error "No write permission in current directory: $(pwd)"
+        return 1
+    fi
+    rm -f test_write_permission 2>/dev/null || true
+    
+    # Check if we're in the right directory (should have go.mod)
+    if [ ! -f "go.mod" ]; then
+        print_error "go.mod not found in $(pwd). This doesn't appear to be a Go project directory."
+        print_status "Looking for go.mod in parent directories..."
+        # Try to find go.mod in parent directories
+        SEARCH_DIR="$(pwd)"
+        while [ "$SEARCH_DIR" != "/" ] && [ ! -f "$SEARCH_DIR/go.mod" ]; do
+            SEARCH_DIR="$(dirname "$SEARCH_DIR")"
+        done
+        if [ -f "$SEARCH_DIR/go.mod" ]; then
+            print_status "Found go.mod in $SEARCH_DIR, changing directory..."
+            cd "$SEARCH_DIR"
+        else
+            print_error "Could not find go.mod file. Cannot run Go simulator."
+            print_status "Current directory contents:"
+            ls -la
+            return 1
+        fi
+    fi
+    
+    print_status "Working in directory: $(pwd)"
+    
     if [ -x "./simulator" ]; then
         SIM_RUN_CMD="./simulator"
+        print_status "Using compiled simulator binary"
     else
-        SIM_RUN_CMD="go run ./cmd/simulator"
+        # Check if Go is available
+        if ! command -v go >/dev/null 2>&1; then
+            print_error "Go is not installed or not in PATH"
+            return 1
+        fi
+        # Verify go.mod exists
+        if [ ! -f "go.mod" ]; then
+            print_error "go.mod file not found in $(pwd)"
+            return 1
+        fi
+        
+        # Try to build the simulator first
+        print_status "Building simulator binary..."
+        if go build -o simulator ./cmd/simulator 2>/dev/null; then
+            SIM_RUN_CMD="./simulator"
+            print_status "Successfully built simulator binary"
+        else
+            print_warning "Failed to build simulator binary, using go run instead"
+            SIM_RUN_CMD="go run ./cmd/simulator"
+            print_status "Using go run ./cmd/simulator"
+        fi
     fi
 
     if [ -n "$OSRM_URL" ]; then
@@ -1565,38 +1651,127 @@ start_simulator() {
         print_warning "OSRM_BASE_URL not set; simulator will default to public OSRM internally"
     fi
 
-    # Launch in background
+    # Create/clear output files with proper permissions
+    rm -f simulator.out .simulator_pid 2>/dev/null || true
+    touch simulator.out .simulator_pid
+    chmod 666 simulator.out .simulator_pid
+    
+    # Launch in background with robust file handling
     if [ -n "$OSRM_URL" ]; then
-        nohup env \
-            SIM_AUTH_TOKEN="$TOKEN" \
-            API_BASE_URL="http://localhost:8081/api" \
-            SIM_TICK_SECONDS="$SIM_TICK_SECONDS" \
-            FLEET_SIZE="$FLEET_SIZE" \
-            SIM_SNAP_TO_ROAD="$SIM_SNAP_TO_ROAD" \
-            SIM_GLOBAL="$SIM_GLOBAL" \
-            SIM_USE_EXISTING="${SIM_USE_EXISTING:-0}" \
-            OSRM_BASE_URL="$OSRM_URL" \
-            $SIM_RUN_CMD > simulator.out 2>&1 &
+        {
+            env \
+                SIM_AUTH_TOKEN="$TOKEN" \
+                API_BASE_URL="http://localhost:8081/api" \
+                SIM_TICK_SECONDS="$SIM_TICK_SECONDS" \
+                FLEET_SIZE="$FLEET_SIZE" \
+                SIM_SNAP_TO_ROAD="$SIM_SNAP_TO_ROAD" \
+                SIM_GLOBAL="$SIM_GLOBAL" \
+                SIM_USE_EXISTING="${SIM_USE_EXISTING:-0}" \
+                OSRM_BASE_URL="$OSRM_URL" \
+                $SIM_RUN_CMD
+        } > simulator.out 2>&1 &
     else
-        nohup env \
-            SIM_AUTH_TOKEN="$TOKEN" \
-            API_BASE_URL="http://localhost:8081/api" \
-            SIM_TICK_SECONDS="$SIM_TICK_SECONDS" \
-            FLEET_SIZE="$FLEET_SIZE" \
-            SIM_SNAP_TO_ROAD="$SIM_SNAP_TO_ROAD" \
-            SIM_GLOBAL="$SIM_GLOBAL" \
-            SIM_USE_EXISTING="${SIM_USE_EXISTING:-0}" \
-            $SIM_RUN_CMD > simulator.out 2>&1 &
+        {
+            env \
+                SIM_AUTH_TOKEN="$TOKEN" \
+                API_BASE_URL="http://localhost:8081/api" \
+                SIM_TICK_SECONDS="$SIM_TICK_SECONDS" \
+                FLEET_SIZE="$FLEET_SIZE" \
+                SIM_SNAP_TO_ROAD="$SIM_SNAP_TO_ROAD" \
+                SIM_GLOBAL="$SIM_GLOBAL" \
+                SIM_USE_EXISTING="${SIM_USE_EXISTING:-0}" \
+                $SIM_RUN_CMD
+        } > simulator.out 2>&1 &
     fi
     SIM_PID=$!
-    echo "$SIM_PID" > .simulator_pid
-    print_status "Simulator started (PID: $SIM_PID). Logs: simulator.out"
+    sleep 0.5  # Longer delay to ensure process has started
+    
+    # Verify the process is actually running
+    if ! kill -0 "$SIM_PID" >/dev/null 2>&1; then
+        print_error "Simulator process failed to start (PID: $SIM_PID)"
+        print_status "Checking simulator.out for error details:"
+        if [ -f "simulator.out" ]; then
+            tail -10 simulator.out
+        else
+            print_warning "No simulator.out file found"
+        fi
+        
+        # Try auto-fix as a last resort
+        print_status "Attempting auto-fix to resolve issues..."
+        auto_fix >/dev/null 2>&1 || true
+        
+        # Try starting simulator again after auto-fix
+        print_status "Retrying simulator start after auto-fix..."
+        sleep 2
+        
+        # Re-run the simulator start process
+        if [ -n "$OSRM_URL" ]; then
+            {
+                env \
+                    SIM_AUTH_TOKEN="$TOKEN" \
+                    API_BASE_URL="http://localhost:8081/api" \
+                    SIM_TICK_SECONDS="$SIM_TICK_SECONDS" \
+                    FLEET_SIZE="$FLEET_SIZE" \
+                    SIM_SNAP_TO_ROAD="$SIM_SNAP_TO_ROAD" \
+                    SIM_GLOBAL="$SIM_GLOBAL" \
+                    SIM_USE_EXISTING="${SIM_USE_EXISTING:-0}" \
+                    OSRM_BASE_URL="$OSRM_URL" \
+                    $SIM_RUN_CMD
+            } > simulator.out 2>&1 &
+        else
+            {
+                env \
+                    SIM_AUTH_TOKEN="$TOKEN" \
+                    API_BASE_URL="http://localhost:8081/api" \
+                    SIM_TICK_SECONDS="$SIM_TICK_SECONDS" \
+                    FLEET_SIZE="$FLEET_SIZE" \
+                    SIM_SNAP_TO_ROAD="$SIM_SNAP_TO_ROAD" \
+                    SIM_GLOBAL="$SIM_GLOBAL" \
+                    SIM_USE_EXISTING="${SIM_USE_EXISTING:-0}" \
+                    $SIM_RUN_CMD
+            } > simulator.out 2>&1 &
+        fi
+        
+        SIM_PID=$!
+        sleep 1
+        
+        # Check if retry worked
+        if kill -0 "$SIM_PID" >/dev/null 2>&1; then
+            print_status "Simulator started successfully on retry (PID: $SIM_PID)"
+        else
+            print_error "Simulator still failed to start after auto-fix"
+            return 1
+        fi
+    fi
+    
+    # Write PID file with robust error handling
+    {
+        printf "%s\n" "$SIM_PID" > .simulator_pid 2>/dev/null && print_status "PID file written successfully" || {
+            print_warning "Could not write to .simulator_pid file - trying alternative method"
+            # Try alternative methods
+            printf "%s\n" "$SIM_PID" > .simulator_pid 2>/dev/null || {
+                # Use a different approach
+                echo "$SIM_PID" | tee .simulator_pid >/dev/null 2>&1 || {
+                    print_warning "All methods failed to write PID file - using backup location"
+                    # Create a backup method
+                    printf "%s\n" "$SIM_PID" > /tmp/fleet_simulator_pid 2>/dev/null || true
+                }
+            }
+        }
+    }
+    
+    # Verify PID file was created
+    if [ -f ".simulator_pid" ] || [ -f "/tmp/fleet_simulator_pid" ]; then
+        print_status "Simulator started successfully (PID: $SIM_PID). Logs: simulator.out"
+    else
+        print_warning "Simulator started (PID: $SIM_PID) but PID file creation failed"
+    fi
 }
 
 stop_simulator() {
     print_header
     print_status "Stopping simulator..."
-    cd "$(dirname "$0")/.."
+    cd "$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")/.."
     if [ -f ".simulator_pid" ]; then
         SIM_PID=$(cat .simulator_pid)
         if kill -0 "$SIM_PID" >/dev/null 2>&1; then
@@ -1604,6 +1779,13 @@ stop_simulator() {
             sleep 1
         fi
         rm -f .simulator_pid
+    elif [ -f "/tmp/fleet_simulator_pid" ]; then
+        SIM_PID=$(cat /tmp/fleet_simulator_pid)
+        if kill -0 "$SIM_PID" >/dev/null 2>&1; then
+            kill "$SIM_PID" >/dev/null 2>&1 || true
+            sleep 1
+        fi
+        rm -f /tmp/fleet_simulator_pid
     fi
     # Fallback
     pkill -f './simulator' >/dev/null 2>&1 || pkill -f 'go run ./cmd/simulator' >/dev/null 2>&1 || true
@@ -1613,22 +1795,44 @@ stop_simulator() {
 simulator_status() {
     print_header
     print_status "Simulator status:"
-    cd "$(dirname "$0")/.."
+    cd "$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")/.."
+    
+    # Check primary PID file
     if [ -f ".simulator_pid" ]; then
         SIM_PID=$(cat .simulator_pid)
         if kill -0 "$SIM_PID" >/dev/null 2>&1; then
             echo "PID: $SIM_PID (running)"
+            return 0
         else
-            echo "PID file present but process not running"
-        fi
-    else
-        # Try to detect by process
-        if pgrep -f './simulator' >/dev/null 2>&1 || pgrep -f 'go run ./cmd/simulator' >/dev/null 2>&1; then
-            echo "Running (process detected), but no PID file"
-        else
-            echo "Not running"
+            echo "PID file present but process not running (PID: $SIM_PID)"
         fi
     fi
+    
+    # Check backup PID file
+    if [ -f "/tmp/fleet_simulator_pid" ]; then
+        SIM_PID=$(cat /tmp/fleet_simulator_pid)
+        if kill -0 "$SIM_PID" >/dev/null 2>&1; then
+            echo "PID: $SIM_PID (running) - using backup PID file"
+            return 0
+        else
+            echo "Backup PID file present but process not running (PID: $SIM_PID)"
+        fi
+    fi
+    
+    # Try to detect by process name
+    SIM_PID=$(pgrep -f './simulator' 2>/dev/null | head -1)
+    if [ -n "$SIM_PID" ]; then
+        echo "Running (process detected: PID $SIM_PID), but no PID file"
+        return 0
+    fi
+    
+    SIM_PID=$(pgrep -f 'go run ./cmd/simulator' 2>/dev/null | head -1)
+    if [ -n "$SIM_PID" ]; then
+        echo "Running (go run process detected: PID $SIM_PID), but no PID file"
+        return 0
+    fi
+    
+    echo "Not running"
 }
 
 # OSRM (routing) controls
@@ -1657,7 +1861,7 @@ start_local_osrm() {
         print_error "Docker is not running; cannot start local OSRM."
         return 1
     fi
-    cd "$(dirname "$0")/.."
+    cd "$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")/.."
     OSRM_DIR="$(pwd)/build/osrm"
     mkdir -p "$OSRM_DIR"
     DATA_PBF="$OSRM_DIR/monaco-latest.osm.pbf"
@@ -2710,4 +2914,5 @@ case "${1:-}" in
         show_help
         exit 1
         ;;
+esac 
 esac 
