@@ -66,141 +66,33 @@ free_port() {
         print_warning "Port $port is in use by:"
         lsof -i :$port
         
-        # Get all PIDs using the port
+        # Only kill Node.js processes
         local pids=$(lsof -ti:$port)
-        local killed_any=false
-        
         for pid in $pids; do
             local process_name=$(ps -p $pid -o comm= 2>/dev/null)
-            local full_command=$(ps -p $pid -o command= 2>/dev/null)
-            
-            # Skip system processes that we shouldn't kill
-            if [[ "$process_name" == "kernel" ]] || [[ "$process_name" == "system" ]] || [[ "$full_command" == *"kernel"* ]]; then
-                print_warning "Skipping system process $process_name (PID: $pid)"
-                continue
+            if [[ "$process_name" == *"node"* ]] || [[ "$process_name" == *"npm"* ]]; then
+                print_status "Killing Node.js process on port $port (PID: $pid)"
+                kill -9 $pid 2>/dev/null
+            else
+                print_warning "Skipping non-Node.js process $process_name (PID: $pid)"
             fi
-            
-            # Kill the process (including Docker processes)
-            print_status "Killing process $process_name on port $port (PID: $pid)"
-            kill -9 $pid 2>/dev/null
-            killed_any=true
         done
         
-        if [ "$killed_any" = true ]; then
-            # Wait a moment for port to be freed
-            sleep 3
-            
-            # Check if port is now free
-            if check_port $port; then
-                print_error "Port $port is still in use after killing processes"
-                return 1
-            else
-                print_status "Port $port is now free"
-                return 0
-            fi
-        else
-            print_warning "No processes were killed on port $port"
+        # Wait a moment for port to be freed
+        sleep 2
+        
+        # Check if port is now free
+        if check_port $port; then
+            print_error "Port $port is still in use"
             return 1
+        else
+            print_status "Port $port is now free"
+            return 0
         fi
     else
         print_status "Port $port is already free"
         return 0
     fi
-}
-
-# Function to force kill Docker processes blocking ports
-kill_docker_processes() {
-    print_status "Force killing Docker Desktop and Docker Engine..."
-    echo ""
-    
-    # First, stop all Docker containers
-    print_status "Stopping all Docker containers..."
-    if docker ps -q 2>/dev/null | grep -q .; then
-        print_status "Found running containers, stopping them..."
-        docker stop $(docker ps -q) 2>/dev/null || true
-        sleep 2
-        print_status "Containers stopped"
-    else
-        print_status "No running containers found"
-    fi
-    
-    # Find and kill the actual Docker Desktop processes by PID
-    print_status "Finding and killing Docker Desktop processes..."
-    local docker_pids=$(ps aux | grep -E "(Docker Desktop|Docker Desktop Helper)" | grep -v grep | awk '{print $2}')
-    
-    if [ -n "$docker_pids" ]; then
-        print_status "Found Docker processes: $docker_pids"
-        for pid in $docker_pids; do
-            local process_name=$(ps -p $pid -o comm= 2>/dev/null)
-            local process_user=$(ps -p $pid -o user= 2>/dev/null)
-            print_status "Force killing $process_name (PID: $pid, User: $process_user)"
-            if [ "$process_user" = "root" ]; then
-                sudo kill -9 $pid 2>/dev/null || true
-            else
-                kill -9 $pid 2>/dev/null || true
-            fi
-        done
-    fi
-    
-    # Kill Docker Desktop application by exact process names
-    print_status "Force killing Docker Desktop application processes..."
-    killall -9 "Docker Desktop" 2>/dev/null || true
-    killall -9 "Docker Desktop Helper" 2>/dev/null || true
-    killall -9 "Docker Desktop Helper (GPU)" 2>/dev/null || true
-    killall -9 "Docker Desktop Helper (Renderer)" 2>/dev/null || true
-    
-    # Kill Docker daemon processes
-    print_status "Killing Docker daemon processes..."
-    sudo pkill -9 -f "com.docker.vmnetd" 2>/dev/null || true
-    sudo pkill -9 -f "com.docker.backend" 2>/dev/null || true
-    sudo pkill -9 -f "com.docker.hyperkit" 2>/dev/null || true
-    
-    # Stop Docker daemon services
-    print_status "Stopping Docker daemon services..."
-    sudo launchctl stop com.docker.docker 2>/dev/null || true
-    sudo launchctl stop com.docker.hyperkit 2>/dev/null || true
-    sudo launchctl stop com.docker.vmnetd 2>/dev/null || true
-    sudo launchctl stop com.docker.backend 2>/dev/null || true
-    
-    # Kill processes using Docker socket
-    print_status "Killing processes using Docker socket..."
-    sudo lsof -t /Users/yilmazu/.docker/run/docker.sock 2>/dev/null | xargs sudo kill -9 2>/dev/null || true
-    
-    # Wait for processes to die
-    sleep 3
-    
-    # Nuclear option - kill everything Docker-related
-    print_status "Nuclear option - killing all Docker-related processes..."
-    pkill -9 -f "Docker" 2>/dev/null || true
-    sudo pkill -9 -f "com.docker" 2>/dev/null || true
-    sudo pkill -9 -f "hyperkit" 2>/dev/null || true
-    sudo pkill -9 -f "vmnetd" 2>/dev/null || true
-    
-    # Wait again
-    sleep 3
-    
-    # Check if Docker processes are still running
-    local remaining_docker=$(ps aux | grep -E "(Docker Desktop|com\.docker)" | grep -v grep | wc -l)
-    if [ "$remaining_docker" -gt 0 ]; then
-        print_warning "Docker processes still running, trying final approach..."
-        # Final attempt - kill by full path
-        pkill -9 -f "/Applications/Docker.app" 2>/dev/null || true
-        pkill -9 -f "Docker Desktop" 2>/dev/null || true
-        sleep 2
-    fi
-    
-    # Final check
-    local final_check=$(ps aux | grep -E "(Docker Desktop|com\.docker)" | grep -v grep | wc -l)
-    if [ "$final_check" -gt 0 ]; then
-        print_error "❌ Docker processes still running after all attempts"
-        print_status "Remaining processes:"
-        ps aux | grep -E "(Docker Desktop|com\.docker)" | grep -v grep
-        print_status "Try manually: sudo pkill -9 -f 'Docker Desktop'"
-    else
-        print_status "✅ Docker Desktop and Engine successfully stopped"
-    fi
-    
-    echo ""
 }
 
 # Function to check Docker containers
@@ -259,13 +151,12 @@ troubleshooting() {
         echo "🔧 Troubleshooting Menu"
         echo ""
         echo "1) Free ports (8080, 8081, 8082, 3000)"
-        echo "2) Kill all Docker containers and processes"
-        echo "3) Check Docker containers"
-        echo "4) Check application logs"
-        echo "5) Auto-fix (reset + seed + start movement)"
-        echo "6) Back to main menu"
+        echo "2) Check Docker containers"
+        echo "3) Check application logs"
+        echo "4) Auto-fix (reset + seed + start movement)"
+        echo "5) Back to main menu"
         echo ""
-        read -p "Enter your choice (1-6): " choice
+        read -p "Enter your choice (1-5): " choice
         
         case $choice in
             1)
@@ -291,33 +182,28 @@ troubleshooting() {
                 read -p "Press Enter to continue..."
                 ;;
             2)
-                kill_docker_processes
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            3)
                 print_header
                 check_docker_containers
                 echo ""
                 read -p "Press Enter to continue..."
                 ;;
-            4)
+            3)
                 print_header
                 check_application_logs
                 echo ""
                 read -p "Press Enter to continue..."
                 ;;
-            5)
+            4)
                 print_header
                 auto_fix
                 echo ""
                 read -p "Press Enter to continue..."
                 ;;
-            6)
+            5)
                 break
                 ;;
             *)
-                print_error "Invalid choice. Please enter 1-6."
+                print_error "Invalid choice. Please enter 1-5."
                 sleep 2
                 ;;
         esac
