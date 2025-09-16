@@ -4,9 +4,9 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 import apiService from '../services/api';
 import { Telemetry, Vehicle } from '../types';
 
-type Props = { vehicles: Vehicle[]; timeRange?: { from?: string; to?: string } };
+type Props = { vehicles: Vehicle[]; timeRange?: { from?: string; to?: string }; selectedVehicleId?: string | null };
 
-const VehicleDetail: React.FC<Props> = ({ vehicles, timeRange }) => {
+const VehicleDetail: React.FC<Props> = ({ vehicles, timeRange, selectedVehicleId }) => {
   const [vehicleId, setVehicleId] = useState<string>(vehicles[0]?.id || '');
   const [data, setData] = useState<Telemetry[]>([]);
   const [rangeMs, setRangeMs] = useState<{ from: number; to: number } | null>(null);
@@ -16,10 +16,12 @@ const VehicleDetail: React.FC<Props> = ({ vehicles, timeRange }) => {
   const selectedType = selectedVehicle?.type;
 
   useEffect(() => {
-    if (!vehicleId && vehicles.length > 0) {
+    if (selectedVehicleId && vehicles.some(v => v.id === selectedVehicleId)) {
+      setVehicleId(selectedVehicleId);
+    } else if (!vehicleId && vehicles.length > 0) {
       setVehicleId(vehicles[0].id);
     }
-  }, [vehicles, vehicleId]);
+  }, [vehicles, vehicleId, selectedVehicleId]);
 
   useEffect(() => {
     if (!vehicleId) return;

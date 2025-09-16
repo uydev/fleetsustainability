@@ -15,6 +15,7 @@ L.Icon.Default.mergeOptions({
 
 interface WorldMapProps {
   telemetry: Telemetry[];
+  onNavigateToVehicleDetail?: (vehicleId: string) => void;
 }
 
 export interface WorldMapRef {
@@ -140,7 +141,7 @@ const VehicleMarker: React.FC<VehicleMarkerProps> = ({ vehicle, icon, markersRef
   );
 };
 
-const WorldMap = forwardRef<WorldMapRef, WorldMapProps>(({ telemetry }, ref) => {
+const WorldMap = forwardRef<WorldMapRef, WorldMapProps>(({ telemetry, onNavigateToVehicleDetail }, ref) => {
   // Map instance reference
   const mapRef = useRef<L.Map | null>(null);
   // Store marker references for popup control
@@ -468,6 +469,24 @@ const WorldMap = forwardRef<WorldMapRef, WorldMapProps>(({ telemetry }, ref) => 
                     </>
                   )}
                   <p><strong>Location:</strong> {vehicle.location.lat.toFixed(4)}, {vehicle.location.lon.toFixed(4)}</p>
+                  {onNavigateToVehicleDetail && (
+                    <p style={{ marginTop: '10px' }}>
+                      <button 
+                        onClick={() => onNavigateToVehicleDetail(vehicle.vehicle_id)}
+                        style={{
+                          background: '#1976d2',
+                          color: 'white',
+                          border: 'none',
+                          padding: '8px 16px',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '14px'
+                        }}
+                      >
+                        View Details
+                      </button>
+                    </p>
+                  )}
                 </div>
               </Popup>
             </VehicleMarker>

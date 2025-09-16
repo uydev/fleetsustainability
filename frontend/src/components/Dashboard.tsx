@@ -70,6 +70,7 @@ const Dashboard: React.FC = () => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [currentTimeRange, setCurrentTimeRange] = useState<{ from?: string; to?: string }>({});
   const [alerts, setAlerts] = useState<Array<{type:string; vehicle_id:string; value:number; ts:string}>>([]);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   
   // Reference to the WorldMap component
   const worldMapRef = useRef<WorldMapRef>(null);
@@ -79,6 +80,12 @@ const Dashboard: React.FC = () => {
     if (worldMapRef.current) {
       worldMapRef.current.focusOnVehicle(vehicleId);
     }
+  };
+
+  // Function to navigate to Vehicle Detail tab with specific vehicle ID
+  const handleNavigateToVehicleDetail = (vehicleId: string) => {
+    setSelectedVehicleId(vehicleId);
+    setTabValue(2); // Vehicle Detail tab is at index 2
   };
 
   const handleTimeRangeChange = useCallback(async (timeRange: { from?: string; to?: string }) => {
@@ -168,6 +175,10 @@ const Dashboard: React.FC = () => {
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
+    // Clear selected vehicle ID when switching away from Vehicle Detail tab
+    if (newValue !== 2) {
+      setSelectedVehicleId(null);
+    }
   };
 
   const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
@@ -292,12 +303,12 @@ const Dashboard: React.FC = () => {
         </Grid>
       </TabPanel>
 
-      <TabPanel value={tabValue} index={1}>
-        <LiveView />
-      </TabPanel>
+        <TabPanel value={tabValue} index={1}>
+          <LiveView onNavigateToVehicleDetail={handleNavigateToVehicleDetail} />
+        </TabPanel>
 
       <TabPanel value={tabValue} index={2}>
-        <VehicleDetail vehicles={vehicles} timeRange={currentTimeRange} />
+        <VehicleDetail vehicles={vehicles} timeRange={currentTimeRange} selectedVehicleId={selectedVehicleId} />
       </TabPanel>
 
       <TabPanel value={tabValue} index={3}>

@@ -11,7 +11,11 @@ type TelemetryById = Map<string, Telemetry>;
 
 type VehicleMeta = { id: string; type?: string; status?: string; current_location?: { lat: number; lon: number } };
 
-const LiveView: React.FC = () => {
+interface LiveViewProps {
+  onNavigateToVehicleDetail?: (vehicleId: string) => void;
+}
+
+const LiveView: React.FC<LiveViewProps> = ({ onNavigateToVehicleDetail }) => {
   const [telemetryList, setTelemetryList] = useState<Telemetry[]>([]);
   const [vehicles, setVehicles] = useState<VehicleMeta[]>([]);
   const storeRef = useRef<TelemetryById>(new Map());
@@ -148,7 +152,7 @@ const LiveView: React.FC = () => {
           Real-time stream with automatic API polling fallback. Start the simulator to see movement.
         </Typography>
       </Paper>
-      <WorldMap telemetry={currentTelemetry} />
+      <WorldMap telemetry={currentTelemetry} onNavigateToVehicleDetail={onNavigateToVehicleDetail} />
     </Box>
   );
 };
