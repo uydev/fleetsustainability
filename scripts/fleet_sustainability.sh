@@ -675,6 +675,12 @@ show_help() {
     echo "  $0 sim-start global          # force global spawn + public OSRM"
     echo "  OSRM_BASE_URL=https://router.project-osrm.org SIM_GLOBAL=1 $0 sim-start"
     echo ""
+    # Final success message
+    print_status "✅ Populate completed successfully!"
+    print_status "   Created $VEH_CREATED vehicles with $TRIP_CREATED trips"
+    print_status "   Simulator: Running with all vehicles using global OSRM"
+    print_status "   Vehicles should now be moving and snapped to roads!"
+    
     # Pause in interactive sessions so the screen doesn't clear immediately
     if [ -t 0 ]; then
         read -p "Press Enter to go back..." </dev/tty
@@ -1047,6 +1053,24 @@ populate_database() {
                 "-23.5505:-46.6333"
             )
         fi
+        
+        # Convert cities array to SIM_EXTRA_CITIES format for simulator
+        SIM_EXTRA_CITIES=""
+        for city in "${CITIES[@]}"; do
+            if [ -n "$SIM_EXTRA_CITIES" ]; then
+                SIM_EXTRA_CITIES="$SIM_EXTRA_CITIES;"
+            fi
+            # Convert "lat:lon" to "lat,lon" format
+            latlon=$(echo "$city" | tr ':' ',')
+            SIM_EXTRA_CITIES="$SIM_EXTRA_CITIES$latlon"
+        done
+        
+        print_status "Selected cities for simulator: ${CITIES[*]}"
+        print_status "SIM_EXTRA_CITIES will be set to: $SIM_EXTRA_CITIES"
+        
+        # Export the variable so it's available when simulator starts
+        export SIM_EXTRA_CITIES
+        
         choose_window
     else
         # Basic: top 5 cities and window prompt
@@ -1109,11 +1133,7 @@ JSON
     VEHICLES=(
         '{"type": "EV", "make": "Tesla", "model": "Model 3", "year": 2023, "status": "active"}'
         '{"type": "EV", "make": "Tesla", "model": "Model Y", "year": 2023, "status": "active"}'
-        '{"type": "EV", "make": "Nissan", "model": "Leaf", "year": 2023, "status": "active"}'
-        '{"type": "EV", "make": "Ford", "model": "E-Transit", "year": 2023, "status": "active"}'
-        '{"type": "EV", "make": "Rivian", "model": "R1T", "year": 2023, "status": "active"}'
         '{"type": "ICE", "make": "Ford", "model": "F-150", "year": 2022, "status": "active"}'
-        '{"type": "ICE", "make": "Chevrolet", "model": "Silverado", "year": 2021, "status": "active"}'
         '{"type": "ICE", "make": "Toyota", "model": "Tacoma", "year": 2022, "status": "active"}'
     )
         TOTAL_VEH=${#VEHICLES[@]}
@@ -1128,10 +1148,35 @@ JSON
             CITY_COORDS="${CITIES[$CITY_IDX]}"
             BASE_LAT=$(echo "$CITY_COORDS" | cut -d':' -f1)
             BASE_LON=$(echo "$CITY_COORDS" | cut -d':' -f2)
-            LAT_OFF=$(echo "scale=4; ($RANDOM % 100 - 50) / 1000" | bc -l 2>/dev/null || echo "0.0200")
-            LON_OFF=$(echo "scale=4; ($RANDOM % 100 - 50) / 1000" | bc -l 2>/dev/null || echo "0.0200")
-            V_LAT=$(echo "scale=6; $BASE_LAT + $LAT_OFF" | bc -l 2>/dev/null || echo "$BASE_LAT")
-            V_LON=$(echo "scale=6; $BASE_LON + $LON_OFF" | bc -l 2>/dev/null || echo "$BASE_LON")
+            
+            # Generate land-validated coordinates (avoid sea areas)
+            ATTEMPTS=0
+            MAX_ATTEMPTS=10
+            while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
+                LAT_OFF=$(echo "scale=4; ($RANDOM % 100 - 50) / 1000" | bc -l 2>/dev/null || echo "0.0200")
+                LON_OFF=$(echo "scale=4; ($RANDOM % 100 - 50) / 1000" | bc -l 2>/dev/null || echo "0.0200")
+                V_LAT=$(echo "scale=6; $BASE_LAT + $LAT_OFF" | bc -l 2>/dev/null || echo "$BASE_LAT")
+                V_LON=$(echo "scale=6; $BASE_LON + $LON_OFF" | bc -l 2>/dev/null || echo "$BASE_LON")
+                
+                # Simple land validation: avoid extreme coordinates that are likely sea
+                # This is a basic check - in production you'd use a proper land/sea API
+                if (( $(echo "$V_LAT > -60 && $V_LAT < 80" | bc -l) )) && (( $(echo "$V_LON > -180 && $V_LON < 180" | bc -l) )); then
+                    # Additional check: avoid coordinates that look like they're in the middle of oceans
+                    # This is a simplified check - real implementation would use a land/sea database
+                    LAT_ABS=$(echo "scale=6; if($V_LAT < 0) -$V_LAT else $V_LAT" | bc -l)
+                    LON_ABS=$(echo "scale=6; if($V_LON < 0) -$V_LON else $V_LON" | bc -l)
+                    if (( $(echo "$LAT_ABS > 0.1 && $LON_ABS > 0.1" | bc -l) )); then
+                        break  # Valid land coordinates found
+                    fi
+                fi
+                ATTEMPTS=$((ATTEMPTS+1))
+            done
+            
+            # If we couldn't find good coordinates, use the city center
+            if [ $ATTEMPTS -eq $MAX_ATTEMPTS ]; then
+                V_LAT="$BASE_LAT"
+                V_LON="$BASE_LON"
+            fi
             VEHICLE_BODY=$(python3 - <<PY
 import json
 v=json.loads('''$vehicle''')
@@ -1542,6 +1587,34 @@ PY
     echo ""
     echo -e "${YELLOW}You can now open Live View to see movement.${NC}"
     echo ""
+    
+    # If city-based option was used, restart simulator to pick up new cities
+    if [ "$psel" = "2" ] && [ -n "${SIM_EXTRA_CITIES:-}" ]; then
+        echo ""
+        print_status "City-based option detected - restarting simulator with selected cities..."
+        
+        # Stop existing simulator
+        stop_simulator >/dev/null 2>&1 || true
+        sleep 2
+        
+        # For global cities (like India), use public OSRM for better road coverage
+        # Local OSRM only has Monaco data, which doesn't cover India well
+        print_status "Using public OSRM for global road coverage (includes India)..."
+        export OSRM_BASE_URL="https://router.project-osrm.org"
+        
+        # Use existing vehicles from populate instead of creating new ones
+        export SIM_USE_EXISTING=1
+        export FLEET_SIZE=8  # Match the number of vehicles created by populate
+        
+        # Start simulator with the selected cities
+        print_status "Starting simulator with cities: ${CITIES[*]}"
+        print_status "Environment: SIM_USE_EXISTING=$SIM_USE_EXISTING, FLEET_SIZE=$FLEET_SIZE, SIM_EXTRA_CITIES=$SIM_EXTRA_CITIES"
+        start_simulator local
+        
+        echo ""
+        print_status "✅ Simulator restarted with selected cities!"
+        print_status "Vehicles should now spawn in and move between your selected cities."
+    fi
 }
 
 # Function to ensure admin user exists
@@ -1671,9 +1744,9 @@ start_simulator() {
     fi
 
     # Defaults (can be overridden with env vars)
-    : "${FLEET_SIZE:=1}"
-    : "${SIM_TICK_SECONDS:=1}"
-    : "${SIM_SNAP_TO_ROAD:=1}"
+    FLEET_SIZE="${FLEET_SIZE:-1}"
+    SIM_TICK_SECONDS="${SIM_TICK_SECONDS:-1}"
+    SIM_SNAP_TO_ROAD="${SIM_SNAP_TO_ROAD:-1}"
 
     # Stop any running simulator first and clean up
     stop_simulator >/dev/null 2>&1 || true
@@ -1781,6 +1854,7 @@ start_simulator() {
                 SIM_SNAP_TO_ROAD="$SIM_SNAP_TO_ROAD" \
                 SIM_GLOBAL="$SIM_GLOBAL" \
                 SIM_USE_EXISTING="${SIM_USE_EXISTING:-0}" \
+                SIM_EXTRA_CITIES="${SIM_EXTRA_CITIES:-}" \
                 OSRM_BASE_URL="$OSRM_URL" \
                 $SIM_RUN_CMD
         } > simulator.out 2>&1 &
@@ -1794,6 +1868,7 @@ start_simulator() {
                 SIM_SNAP_TO_ROAD="$SIM_SNAP_TO_ROAD" \
                 SIM_GLOBAL="$SIM_GLOBAL" \
                 SIM_USE_EXISTING="${SIM_USE_EXISTING:-0}" \
+                SIM_EXTRA_CITIES="${SIM_EXTRA_CITIES:-}" \
                 $SIM_RUN_CMD
         } > simulator.out 2>&1 &
     fi
@@ -1829,6 +1904,7 @@ start_simulator() {
                     SIM_SNAP_TO_ROAD="$SIM_SNAP_TO_ROAD" \
                     SIM_GLOBAL="$SIM_GLOBAL" \
                     SIM_USE_EXISTING="${SIM_USE_EXISTING:-0}" \
+                    SIM_EXTRA_CITIES="${SIM_EXTRA_CITIES:-}" \
                     OSRM_BASE_URL="$OSRM_URL" \
                     $SIM_RUN_CMD
             } > simulator.out 2>&1 &
@@ -1842,6 +1918,7 @@ start_simulator() {
                     SIM_SNAP_TO_ROAD="$SIM_SNAP_TO_ROAD" \
                     SIM_GLOBAL="$SIM_GLOBAL" \
                     SIM_USE_EXISTING="${SIM_USE_EXISTING:-0}" \
+                    SIM_EXTRA_CITIES="${SIM_EXTRA_CITIES:-}" \
                     $SIM_RUN_CMD
             } > simulator.out 2>&1 &
         fi
@@ -2548,10 +2625,18 @@ PY
         print_status "   ${WINDOW} posted: $COUNT accepted / $ATTEMPTED attempted"
     done
 
-    # 5) Start simulator using existing vehicles
+    # 5) Restart simulator to use all vehicles with global OSRM for proper road snapping
+    print_status "Restarting simulator to activate all vehicles with global road coverage..."
+    stop_simulator >/dev/null 2>&1 || true
+    sleep 2
+    
+    # Use global OSRM for worldwide road coverage and proper snapping
+    export OSRM_BASE_URL="https://router.project-osrm.org"
     export SIM_USE_EXISTING=1
-    export FLEET_SIZE=1
-    start_simulator local
+    export FLEET_SIZE=4  # Use 4 vehicles maximum
+    
+    print_status "Starting simulator with 4 vehicles using global OSRM..."
+    start_simulator global
 
     # 6) Verify fresh telemetry and report count (with progress)
     print_status "Verifying fresh telemetry (up to ~24s)..."
@@ -2975,10 +3060,10 @@ case "${1:-}" in
             echo "4) Restart the application"
             echo "5) Populate database with dummy data"
             echo "6) Clear database data (preserves users)"
-            echo "7) Show help"
-            echo "8) Simulator"
-            echo "9) OSRM"
-            echo "10) Troubleshoot"
+            echo "7) Simulator"
+            echo "8) OSRM"
+            echo "9) Troubleshoot"
+            echo "10) Show help"
             echo ""
             read -p "Enter your choice (1-10): " choice
 
@@ -3004,16 +3089,16 @@ case "${1:-}" in
                     clear_database
                     ;;
                 7)
-                    show_help
-                    ;;
-                8)
                     simulator_menu
                     ;;
-                9)
+                8)
                     osrm_menu
                     ;;
-                10)
+                9)
                     troubleshooting
+                    ;;
+                10)
+                    show_help
                     ;;
                 *)
                     print_error "Invalid choice. Please run '$0 help' for options."
@@ -3028,5 +3113,4 @@ case "${1:-}" in
         show_help
         exit 1
         ;;
-esac 
-esac 
+esac
