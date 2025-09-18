@@ -30,6 +30,7 @@ import MaintenanceManagement from './MaintenanceManagement';
 import CostManagement from './CostManagement';
 import LiveView from './LiveView';
 import ElectrificationPlanning from './ElectrificationPlanning';
+import DriverEfficiencyLeaderboard from './DriverEfficiencyLeaderboard';
 import apiService from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { Telemetry, FleetMetrics, Vehicle } from '../types';
@@ -293,6 +294,7 @@ const Dashboard: React.FC = () => {
           <Tab label="Cost Management" />
           <Tab label="Maintenance" />
           <Tab label="Electrification" />
+          <Tab label="Driver Leaderboard" />
         </Tabs>
       </Box>
 
@@ -374,6 +376,10 @@ const Dashboard: React.FC = () => {
 
       <TabPanel value={tabValue} index={9}>
         <ElectrificationPlanning vehicles={vehicles} timeRange={currentTimeRange} />
+      </TabPanel>
+
+      <TabPanel value={tabValue} index={10}>
+        <DriverEfficiencyLeaderboard timeRange={currentTimeRange} vehicles={vehicles} telemetry={telemetry} />
       </TabPanel>
     </Container>
     </>
