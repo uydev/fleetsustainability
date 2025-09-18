@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
 // Location represents a geographical location with latitude and longitude coordinates.
@@ -453,6 +455,27 @@ func sendTelemetry(apiURL string, tele Telemetry) {
 		log.WithError(err).Error("Failed to marshal telemetry")
 		return
 	}
+	if broker := os.Getenv("MQTT_BROKER_URL"); broker != "" && os.Getenv("SIM_USE_MQTT") == "1" {
+		// Publish to MQTT
+		opts := mqtt.NewClientOptions().AddBroker(broker)
+		if u := os.Getenv("MQTT_USERNAME"); u != "" { opts.SetUsername(u) }
+		if p := os.Getenv("MQTT_PASSWORD"); p != "" { opts.SetPassword(p) }
+		opts.SetClientID("fleet-sim-" + tele.VehicleID)
+		client := mqtt.NewClient(opts)
+		if token := client.Connect(); token.Wait() && token.Error() != nil {
+			log.WithError(token.Error()).Error("MQTT connect failed (simulator)")
+			return
+		}
+		topic := os.Getenv("MQTT_TELEMETRY_TOPIC")
+		if topic == "" { topic = "fleet/telemetry" }
+		if token := client.Publish(topic, 1, false, data); token.Wait() && token.Error() != nil {
+			log.WithError(token.Error()).Error("MQTT publish failed")
+		}
+		client.Disconnect(250)
+		log.WithFields(log.Fields{"vehicle_id": tele.VehicleID, "topic": topic}).Info("Published telemetry via MQTT")
+		return
+	}
+	// Default: send via HTTP
 	resp, err := authorizedPost(apiURL+"/telemetry", "application/json", bytes.NewBuffer(data))
 	if err != nil {
 		log.WithError(err).Error("Failed to send telemetry")

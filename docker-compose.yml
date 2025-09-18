@@ -8,6 +8,8 @@ services:
     environment:
       - MONGO_URI=mongodb://root:example@mongo:27017
       - MONGO_DB=fleet
+      - MQTT_BROKER_URL=tcp://mosquitto:1883
+      - MQTT_TELEMETRY_TOPIC=fleet/telemetry
   
   mongo:
     image: mongo:6.0
@@ -27,3 +29,13 @@ services:
       ME_CONFIG_MONGODB_ADMINUSERNAME: root
       ME_CONFIG_MONGODB_ADMINPASSWORD: example
       ME_CONFIG_MONGODB_SERVER: mongo
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: fleet-sustainability-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./configs/mosquitto:/mosquitto/config

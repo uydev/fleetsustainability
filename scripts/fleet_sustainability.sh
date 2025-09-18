@@ -249,6 +249,10 @@ check_application_logs() {
     echo ""
     print_status "Mongo Express container logs (last 10 lines):"
     docker-compose logs --tail=10 mongo-express 2>/dev/null || print_warning "Mongo Express container not found or not running"
+
+    echo ""
+    print_status "Mosquitto (MQTT) logs (last 20 lines):"
+    docker-compose logs --tail=20 mosquitto 2>/dev/null || print_warning "Mosquitto container not found or not running"
     
     # Check frontend logs if they exist
     if [ -f "frontend/frontend.log" ]; then
@@ -267,7 +271,7 @@ troubleshooting() {
         echo ""
         echo "🔧 Troubleshooting Menu"
         echo ""
-        echo "1) Free ports (8080, 8081, 8082, 3000)"
+        echo "1) Free ports (8080, 8081, 8082, 3000, 1883, 9001)"
         echo "2) Kill all Docker containers and processes"
         echo "3) Check Docker containers"
         echo "4) Check application logs"
@@ -293,6 +297,10 @@ troubleshooting() {
                 
                 # Free port 3000 (frontend)
                 free_port 3000
+                # Free port 1883 (MQTT broker)
+                free_port 1883
+                # Free port 9001 (MQTT WebSocket)
+                free_port 9001
                 
                 echo ""
                 print_status "🎉 Port freeing complete!"
@@ -432,7 +440,7 @@ start_fleet_sustainability() {
     fi
 
     # Start all services with Docker Compose
-    print_status "1. Starting all services with Docker Compose..."
+    print_status "1. Starting all services with Docker Compose (including MQTT)..."
     cd "$REPO_ROOT"
     docker-compose up -d
     if [ $? -eq 0 ]; then
@@ -470,8 +478,16 @@ start_fleet_sustainability() {
         exit 1
     fi
 
+    # Verify Mosquitto is running
+    print_status "5. Checking Mosquitto (MQTT) container..."
+    if docker ps | grep -q "fleet-sustainability-mosquitto"; then
+        print_status "   Mosquitto container is running"
+    else
+        print_warning "   Mosquitto container is not running"
+    fi
+
     # Ensure admin user exists
-    print_status "5. Ensuring admin user exists..."
+    print_status "6. Ensuring admin user exists..."
     ensure_admin_user
     if [ $? -eq 0 ]; then
         print_status "   Admin user is ready"
@@ -480,7 +496,7 @@ start_fleet_sustainability() {
     fi
 
     # Start frontend (local process)
-    print_status "6. Starting frontend..."
+    print_status "7. Starting frontend..."
     
     # Kill any existing frontend process
     kill_port 3000
@@ -510,7 +526,7 @@ start_fleet_sustainability() {
     echo "$FRONTEND_PID" > .frontend_pid
 
     # Test the application
-    print_status "7. Testing application..."
+    print_status "8. Testing application..."
     sleep 3
     
     # Ensure admin user exists for testing
@@ -616,6 +632,12 @@ show_status() {
         print_warning "❌ Mongo Express: Not running (Docker container)"
     fi
 
+    if docker ps | grep -q "fleet-sustainability-mosquitto"; then
+        print_status "✅ Mosquitto (MQTT): Running (Docker container)"
+    else
+        print_warning "❌ Mosquitto (MQTT): Not running (Docker container)"
+    fi
+
     if docker ps | grep -q "fleet-osrm"; then
         print_status "✅ OSRM: Running (Docker container)"
     else
@@ -641,6 +663,12 @@ show_status() {
         print_status "✅ Mongo Express: Responding on port 8082"
     else
         print_warning "❌ Mongo Express: Not responding on port 8082"
+    fi
+
+    if nc -z localhost 1883 >/dev/null 2>&1; then
+        print_status "✅ MQTT Broker: Listening on 1883"
+    else
+        print_warning "❌ MQTT Broker: Not reachable on 1883"
     fi
 
     # OSRM visibility
@@ -1863,6 +1891,9 @@ start_simulator() {
                 SIM_GLOBAL="$SIM_GLOBAL" \
                 SIM_USE_EXISTING="${SIM_USE_EXISTING:-0}" \
                 SIM_EXTRA_CITIES="${SIM_EXTRA_CITIES:-}" \
+                SIM_USE_MQTT="${SIM_USE_MQTT:-1}" \
+                MQTT_BROKER_URL="${MQTT_BROKER_URL:-tcp://localhost:1883}" \
+                MQTT_TELEMETRY_TOPIC="${MQTT_TELEMETRY_TOPIC:-fleet/telemetry}" \
                 OSRM_BASE_URL="$OSRM_URL" \
                 $SIM_RUN_CMD
         } > simulator.out 2>&1 &
@@ -1877,6 +1908,9 @@ start_simulator() {
                 SIM_GLOBAL="$SIM_GLOBAL" \
                 SIM_USE_EXISTING="${SIM_USE_EXISTING:-0}" \
                 SIM_EXTRA_CITIES="${SIM_EXTRA_CITIES:-}" \
+                SIM_USE_MQTT="${SIM_USE_MQTT:-1}" \
+                MQTT_BROKER_URL="${MQTT_BROKER_URL:-tcp://localhost:1883}" \
+                MQTT_TELEMETRY_TOPIC="${MQTT_TELEMETRY_TOPIC:-fleet/telemetry}" \
                 $SIM_RUN_CMD
         } > simulator.out 2>&1 &
     fi

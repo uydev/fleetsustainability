@@ -13,6 +13,7 @@ import (
 	"time"
 	"strconv"
 
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/joho/godotenv"
 	log "github.com/sirupsen/logrus"
 	"github.com/ukydev/fleet-sustainability/internal/auth"
@@ -1476,6 +1477,98 @@ func main() {
 	http.Handle("/api/telemetry/metrics", corsMiddleware(authMiddleware.Authenticate(telemetryMetricsHandler)))
 	http.Handle("/api/telemetry/metrics/advanced", corsMiddleware(authMiddleware.Authenticate(advancedMetricsHandler)))
 	http.Handle("/api/alerts", corsMiddleware(authMiddleware.Authenticate(alertsHandler)))
+
+	// --- MQTT Subscriber (optional) ---
+	mqttURL := os.Getenv("MQTT_BROKER_URL")
+	mqttTopic := os.Getenv("MQTT_TELEMETRY_TOPIC")
+	if mqttTopic == "" { mqttTopic = "fleet/telemetry" }
+	if mqttURL != "" {
+		opts := mqtt.NewClientOptions().AddBroker(mqttURL)
+		if u := os.Getenv("MQTT_USERNAME"); u != "" { opts.SetUsername(u) }
+		if p := os.Getenv("MQTT_PASSWORD"); p != "" { opts.SetPassword(p) }
+		opts.SetClientID("fleet-backend-" + strconv.FormatInt(time.Now().UnixNano(), 10))
+		opts.SetAutoReconnect(true)
+		opts.SetConnectionLostHandler(func(c mqtt.Client, err error) { log.WithError(err).Warn("MQTT connection lost") })
+		client := mqtt.NewClient(opts)
+		if token := client.Connect(); token.Wait() && token.Error() != nil {
+			log.WithError(token.Error()).Error("MQTT connect failed")
+		} else {
+			log.WithField("broker", mqttURL).Info("MQTT connected")
+			// Subscribe to telemetry topic; payload should mirror POST /api/telemetry body
+			cb := func(_ mqtt.Client, msg mqtt.Message) {
+				var teleIn struct {
+					VehicleID    string          `json:"vehicle_id"`
+					Timestamp    string          `json:"timestamp"`
+					Location     models.Location `json:"location"`
+					Speed        float64         `json:"speed"`
+					FuelLevel    *float64        `json:"fuel_level,omitempty"`
+					BatteryLevel *float64        `json:"battery_level,omitempty"`
+					Emissions    float64         `json:"emissions"`
+					Type         string          `json:"type"`
+					Status       string          `json:"status"`
+					TenantID     string          `json:"tenant_id,omitempty"`
+				}
+				if err := json.Unmarshal(msg.Payload(), &teleIn); err != nil {
+					log.WithError(err).Warn("Invalid MQTT telemetry JSON")
+					return
+				}
+				// Normalize and store
+				timestamp, err := time.Parse(time.RFC3339, teleIn.Timestamp)
+				if err != nil { return }
+				var vehicleObjectID primitive.ObjectID
+				if len(teleIn.VehicleID) == 24 {
+					if oid, err := primitive.ObjectIDFromHex(teleIn.VehicleID); err == nil { vehicleObjectID = oid } else { vehicleObjectID = primitive.NewObjectID() }
+				} else { vehicleObjectID = primitive.NewObjectID() }
+				// Ensure EV emissions are zero
+				emissions := teleIn.Emissions
+				if teleIn.Type == "EV" {
+					emissions = 0
+				}
+				tele := models.Telemetry{
+					VehicleID:    vehicleObjectID,
+					Timestamp:    timestamp,
+					Location:     teleIn.Location,
+					Speed:        teleIn.Speed,
+					FuelLevel:    teleIn.FuelLevel,
+					BatteryLevel: teleIn.BatteryLevel,
+					Emissions:    emissions,
+					Type:         teleIn.Type,
+					Status:       teleIn.Status,
+					TenantID:     teleIn.TenantID,
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := telemetryCollection.InsertTelemetry(ctx, tele); err != nil {
+					log.WithError(err).Error("Failed to store MQTT telemetry")
+					return
+				}
+				// Broadcast via SSE (tenant-aware if provided)
+				eventPayload := map[string]interface{}{
+					"vehicle_id":    teleIn.VehicleID,
+					"timestamp":     teleIn.Timestamp,
+					"location":      teleIn.Location,
+					"speed":         teleIn.Speed,
+					"fuel_level":    teleIn.FuelLevel,
+					"battery_level": teleIn.BatteryLevel,
+					"emissions":     teleIn.Emissions,
+					"type":          teleIn.Type,
+					"status":        teleIn.Status,
+				}
+				if data, err := json.Marshal(eventPayload); err == nil {
+					if telemetrySSEHub != nil && tele.TenantID != "" {
+						telemetrySSEHub.BroadcastToTenant(tele.TenantID, data)
+					} else if telemetrySSEHub != nil {
+						telemetrySSEHub.Broadcast(data)
+					}
+				}
+			}
+			if token := client.Subscribe(mqttTopic, 1, cb); token.Wait() && token.Error() != nil {
+				log.WithError(token.Error()).Error("MQTT subscribe failed")
+			} else {
+				log.WithFields(log.Fields{"topic": mqttTopic}).Info("MQTT subscribed")
+			}
+		}
+	}
 
 	// User profile routes (require authentication)
 	http.HandleFunc("/api/auth/profile", func(w http.ResponseWriter, r *http.Request) {
