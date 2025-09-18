@@ -343,7 +343,7 @@ const WorldMap = forwardRef<WorldMapRef, WorldMapProps>(({ telemetry, onNavigate
   }));
 
   return (
-    <Box sx={{ position: 'relative', height: '500px', width: '100%', borderRadius: '8px', overflow: 'hidden' }}>
+    <Box sx={{ position: 'relative', height: { xs: 300, sm: 400, md: 500 }, width: '100%', borderRadius: '8px', overflow: 'hidden' }}>
       {/* Map Style Switcher */}
       <Box sx={{ 
         position: 'absolute', 

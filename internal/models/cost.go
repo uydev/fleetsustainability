@@ -8,6 +8,7 @@ import (
 // Cost represents a fleet cost record.
 type Cost struct {
 	ID            primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+    TenantID      string             `json:"tenant_id" bson:"tenant_id"`
 	VehicleID     string             `json:"vehicle_id" bson:"vehicle_id"`
 	Category      string             `json:"category" bson:"category"` // "fuel", "maintenance", "insurance", "registration", "tolls", "parking", "other"
 	Description   string             `json:"description" bson:"description"`

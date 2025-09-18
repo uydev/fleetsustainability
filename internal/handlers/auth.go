@@ -116,7 +116,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var registerReq models.RegisterRequest
+    var registerReq models.RegisterRequest
 	if err := json.Unmarshal(body, &registerReq); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
@@ -167,6 +167,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	// Create user
 	user := models.User{
 		ID:           primitive.NewObjectID(),
+        TenantID:     registerReq.TenantID,
 		Username:     registerReq.Username,
 		Email:        registerReq.Email,
 		PasswordHash: passwordHash,

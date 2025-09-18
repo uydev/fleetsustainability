@@ -8,6 +8,7 @@ import (
 // Vehicle represents a fleet vehicle.
 type Vehicle struct {
 	ID              primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+    TenantID        string             `bson:"tenant_id" json:"tenant_id"`
 	Type            string             `bson:"type" json:"type"` // "ICE" or "EV"
 	Make            string             `bson:"make" json:"make"`
 	Model           string             `bson:"model" json:"model"`

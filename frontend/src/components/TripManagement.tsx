@@ -13,9 +13,12 @@ import {
   Chip,
   Alert,
   Snackbar,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
 import {
   Add as AddIcon,
+  Delete as DeleteIcon,
 } from '@mui/icons-material';
 import TripForm from './TripForm';
 import apiService from '../services/api';
@@ -72,6 +75,19 @@ const TripManagement: React.FC<TripManagementProps> = ({ timeRange }) => {
         message: 'Failed to create trip',
         severity: 'error',
       });
+    }
+  };
+
+  const handleDeleteTrip = async (id: string) => {
+    const ok = window.confirm('Delete this trip?');
+    if (!ok) return;
+    try {
+      await apiService.deleteTrip(id);
+      setSnackbar({ open: true, message: 'Trip deleted', severity: 'success' });
+      loadTrips();
+    } catch (error) {
+      console.error('Error deleting trip:', error);
+      setSnackbar({ open: true, message: 'Failed to delete trip', severity: 'error' });
     }
   };
 
@@ -135,7 +151,7 @@ const TripManagement: React.FC<TripManagementProps> = ({ timeRange }) => {
             No trips found. Add your first trip to get started.
           </Typography>
         ) : (
-          <TableContainer>
+          <TableContainer sx={{ overflowX: 'auto' }}>
             <Table>
               <TableHead>
                 <TableRow>
@@ -147,6 +163,7 @@ const TripManagement: React.FC<TripManagementProps> = ({ timeRange }) => {
                   <TableCell>Duration</TableCell>
                   <TableCell>Cost ($)</TableCell>
                   <TableCell>Status</TableCell>
+                  <TableCell>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -171,6 +188,13 @@ const TripManagement: React.FC<TripManagementProps> = ({ timeRange }) => {
                         color={getStatusColor(trip.status) as any}
                         size="small"
                       />
+                    </TableCell>
+                    <TableCell>
+                      <Tooltip title="Delete">
+                        <IconButton size="small" onClick={() => handleDeleteTrip(trip.id!)}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                     </TableCell>
                   </TableRow>
                 ))}

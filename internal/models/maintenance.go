@@ -8,6 +8,7 @@ import (
 // Maintenance represents a vehicle maintenance record.
 type Maintenance struct {
 	ID              primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+    TenantID        string             `json:"tenant_id" bson:"tenant_id"`
 	VehicleID       string             `json:"vehicle_id" bson:"vehicle_id"`
 	ServiceType     string             `json:"service_type" bson:"service_type"` // "oil_change", "tire_rotation", "brake_service", "battery_service", "inspection"
 	Description     string             `json:"description" bson:"description"`

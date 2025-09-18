@@ -9,6 +9,7 @@ import (
 // Telemetry represents a telemetry data record for a vehicle.
 type Telemetry struct {
 	ID           primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+    TenantID     string             `bson:"tenant_id" json:"tenant_id"`
 	VehicleID    primitive.ObjectID `bson:"vehicle_id" json:"vehicle_id"`
 	Timestamp    time.Time          `bson:"timestamp" json:"timestamp"`
 	Location     Location           `bson:"location" json:"location"`

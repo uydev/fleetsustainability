@@ -29,6 +29,15 @@ print_header() {
     echo -e "${BLUE}================================${NC}"
 }
 
+# Resolve absolute repo root once (works even if invoked from any directory)
+SCRIPT_PATH="${BASH_SOURCE[0]:-$0}"
+case "$SCRIPT_PATH" in
+    /*) SCRIPT_ABS="$SCRIPT_PATH" ;;
+    *)  SCRIPT_ABS="$(pwd)/$SCRIPT_PATH" ;;
+esac
+SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_ABS")" >/dev/null 2>&1 && pwd)"
+REPO_ROOT="$(cd -P "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd)"
+
 # Function to check if a port is in use
 check_port() {
     local port=$1
@@ -424,7 +433,7 @@ start_fleet_sustainability() {
 
     # Start all services with Docker Compose
     print_status "1. Starting all services with Docker Compose..."
-    cd "$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")/.."
+    cd "$REPO_ROOT"
     docker-compose up -d
     if [ $? -eq 0 ]; then
         print_status "   Docker services started successfully"
@@ -477,8 +486,7 @@ start_fleet_sustainability() {
     kill_port 3000
     
     # Start frontend in background
-    cd "$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")/.."
-    cd frontend
+    cd "$REPO_ROOT/frontend"
     npm start > frontend.log 2>&1 &
     FRONTEND_PID=$!
     
@@ -498,7 +506,7 @@ start_fleet_sustainability() {
     fi
 
     # Save frontend PID to file for later cleanup
-    cd "$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")/.."
+    cd "$REPO_ROOT"
     echo "$FRONTEND_PID" > .frontend_pid
 
     # Test the application

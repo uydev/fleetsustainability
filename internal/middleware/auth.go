@@ -54,8 +54,8 @@ func (m *AuthMiddleware) Authenticate(next http.Handler) http.Handler {
 			return
 		}
 
-		// Add user context to request
-		ctx := context.WithValue(r.Context(), UserContextKey, claims)
+        // Add user context to request (includes tenant)
+        ctx := context.WithValue(r.Context(), UserContextKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

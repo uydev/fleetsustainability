@@ -78,6 +78,77 @@ const ElectrificationPlanning: React.FC<Props> = ({ vehicles, timeRange }) => {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
 
+  // Assumptions (could be moved to settings later)
+  const FUEL_PRICE_PER_LITER = 1.5; // €
+  const EV_PRICE = 35000; // €
+  const ELECTRICITY_PRICE_PER_KWH = 0.25; // €
+  const TANK_CAPACITY_L = 50; // liters
+  const BATTERY_CAPACITY_KWH = 60; // kWh
+  const EV_EFFICIENCY_KWH_PER_KM = 0.18; // kWh per km (typical compact EV)
+  const MAINT_ICE_PER_KM = 0.08; // € per km
+  const MAINT_EV_PER_KM = 0.05; // € per km
+  const EV_INCENTIVE = 5000; // € government incentive
+
+  const toMs = (s: string) => new Date(s).getTime();
+  const kmBetween = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
+    const R = 6371; // km
+    const dLat = (b.lat - a.lat) * Math.PI / 180;
+    const dLon = (b.lon - a.lon) * Math.PI / 180;
+    const lat1 = a.lat * Math.PI / 180;
+    const lat2 = b.lat * Math.PI / 180;
+    const sinDLat = Math.sin(dLat / 2);
+    const sinDLon = Math.sin(dLon / 2);
+    const h = sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLon * sinDLon;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  };
+
+  const computeDistanceKm = (rows: Telemetry[]): number => {
+    let dist = 0;
+    for (let i = 1; i < rows.length; i++) {
+      const prev = rows[i - 1];
+      const curr = rows[i];
+      dist += kmBetween(prev.location, curr.location);
+    }
+    return dist;
+  };
+
+  const computeDaysCovered = (rows: Telemetry[]): number => {
+    if (rows.length < 2) return 1;
+    const days = (toMs(rows[rows.length - 1].timestamp) - toMs(rows[0].timestamp)) / (1000 * 60 * 60 * 24);
+    return Math.max(1, days);
+  };
+
+  const computeFuelUsedLiters = (rows: Telemetry[]): number => {
+    // Sum only decreases in fuel_level to approximate consumption
+    let usedPct = 0;
+    for (let i = 1; i < rows.length; i++) {
+      const prev = rows[i - 1];
+      const curr = rows[i];
+      const p = prev.fuel_level ?? null;
+      const c = curr.fuel_level ?? null;
+      if (p !== null && c !== null) {
+        const drop = p - c;
+        if (drop > 0) usedPct += drop;
+      }
+    }
+    return (usedPct / 100) * TANK_CAPACITY_L;
+  };
+
+  const computeEnergyUsedKwhFromBattery = (rows: Telemetry[]): number => {
+    let usedPct = 0;
+    for (let i = 1; i < rows.length; i++) {
+      const prev = rows[i - 1];
+      const curr = rows[i];
+      const p = prev.battery_level ?? null;
+      const c = curr.battery_level ?? null;
+      if (p !== null && c !== null) {
+        const drop = p - c;
+        if (drop > 0) usedPct += drop;
+      }
+    }
+    return (usedPct / 100) * BATTERY_CAPACITY_KWH;
+  };
+
   // Fetch telemetry data
   useEffect(() => {
     const fetchTelemetry = async () => {
@@ -101,7 +172,9 @@ const ElectrificationPlanning: React.FC<Props> = ({ vehicles, timeRange }) => {
     const iceVehicles = vehicles.filter(v => v.type === 'ICE');
     
     return iceVehicles.map(vehicle => {
-      const vehicleTelemetry = telemetry.filter(t => t.vehicle_id === vehicle.id);
+      const vehicleTelemetry = telemetry
+        .filter(t => t.vehicle_id === vehicle.id)
+        .sort((a, b) => toMs(a.timestamp) - toMs(b.timestamp));
       
       if (vehicleTelemetry.length === 0) {
         return {
@@ -119,33 +192,30 @@ const ElectrificationPlanning: React.FC<Props> = ({ vehicles, timeRange }) => {
         };
       }
 
-      // Calculate metrics
+      // Calculate metrics from telemetry
+      const daysOfData = computeDaysCovered(vehicleTelemetry);
+      const distanceKm = computeDistanceKm(vehicleTelemetry);
       const avgSpeed = vehicleTelemetry.reduce((sum, t) => sum + t.speed, 0) / vehicleTelemetry.length;
-      const avgFuelLevel = vehicleTelemetry.reduce((sum, t) => sum + (t.fuel_level || 0), 0) / vehicleTelemetry.length;
       const totalEmissions = vehicleTelemetry.reduce((sum, t) => sum + t.emissions, 0);
-      const avgEmissions = totalEmissions / vehicleTelemetry.length;
-      
-      // Estimate annual usage (simplified calculation)
-      const daysOfData = vehicleTelemetry.length > 0 ? 
-        (new Date(vehicleTelemetry[vehicleTelemetry.length - 1].timestamp).getTime() - 
-         new Date(vehicleTelemetry[0].timestamp).getTime()) / (1000 * 60 * 60 * 24) : 1;
-      
-      const annualEmissions = (totalEmissions / Math.max(daysOfData, 1)) * 365;
-      const annualMiles = (avgSpeed * 2) * 365; // Rough estimate: 2 hours driving per day
-      
-      // Cost calculations (simplified)
-      const fuelPricePerLiter = 1.5; // €1.5 per liter
-      const fuelEfficiency = 8; // L/100km
-      const annualFuelCost = (annualMiles / 100) * fuelEfficiency * fuelPricePerLiter;
-      
-      // EV cost estimates
-      const evPrice = 35000; // €35,000 average EV price
-      const electricityCostPerKwh = 0.25; // €0.25 per kWh
-      const evEfficiency = 0.2; // kWh/km
-      const annualEvCost = annualMiles * evEfficiency * electricityCostPerKwh;
-      
-      const annualSavings = annualFuelCost - annualEvCost;
-      const co2Reduction = annualEmissions * 0.8; // Assume 80% CO2 reduction with EV
+      const emissionsPerKm = distanceKm > 0 ? totalEmissions / distanceKm : totalEmissions;
+
+      // Annualize key metrics
+      const annualKm = (distanceKm / daysOfData) * 365;
+      const fuelUsedLiters = computeFuelUsedLiters(vehicleTelemetry);
+      const annualFuelLiters = (fuelUsedLiters / daysOfData) * 365;
+      const annualFuelCost = annualFuelLiters * FUEL_PRICE_PER_LITER;
+
+      // EV operating cost (two approaches; use distance-based to avoid battery% assumptions on ICE)
+      const annualEvKwh = annualKm * EV_EFFICIENCY_KWH_PER_KM;
+      const annualEvCost = annualEvKwh * ELECTRICITY_PRICE_PER_KWH;
+
+      // Maintenance costs
+      const maintIce = annualKm * MAINT_ICE_PER_KM;
+      const maintEv = annualKm * MAINT_EV_PER_KM;
+
+      const annualSavings = (annualFuelCost + maintIce) - (annualEvCost + maintEv);
+      const annualEmissions = (totalEmissions / daysOfData) * 365;
+      const co2Reduction = Math.max(0, annualEmissions * 0.8);
       
       // Calculate priority score (0-100)
       let score = 0;
@@ -157,53 +227,27 @@ const ElectrificationPlanning: React.FC<Props> = ({ vehicles, timeRange }) => {
         reasons.push('ICE vehicle eligible for replacement');
       }
       
-      // High emissions = higher priority
-      if (avgEmissions > 200) {
+      // High emissions per km = higher priority
+      if (emissionsPerKm > 200) {
         score += 25;
         reasons.push('High emissions (>200g/km)');
-      } else if (avgEmissions > 150) {
+      } else if (emissionsPerKm > 150) {
         score += 15;
         reasons.push('Moderate emissions (150-200g/km)');
-      } else if (avgEmissions > 100) {
+      } else if (emissionsPerKm > 100) {
         score += 10;
         reasons.push('Some emissions (100-150g/km)');
       }
       
-      // High fuel consumption = higher priority
-      if (avgFuelLevel < 20) {
-        score += 20;
-        reasons.push('Very high fuel consumption');
-      } else if (avgFuelLevel < 40) {
-        score += 15;
-        reasons.push('High fuel consumption');
-      } else if (avgFuelLevel < 60) {
-        score += 10;
-        reasons.push('Moderate fuel consumption');
-      }
+      // High annual kilometers -> higher priority
+      if (annualKm > 30000) { score += 20; reasons.push('Very high annual mileage (>30k km)'); }
+      else if (annualKm > 20000) { score += 15; reasons.push('High annual mileage (20-30k km)'); }
+      else if (annualKm > 12000) { score += 10; reasons.push('Moderate annual mileage (12-20k km)'); }
       
-      // High annual mileage = higher priority
-      if (annualMiles > 25000) {
-        score += 20;
-        reasons.push('Very high annual mileage (>25k km)');
-      } else if (annualMiles > 15000) {
-        score += 15;
-        reasons.push('High annual mileage (15-25k km)');
-      } else if (annualMiles > 10000) {
-        score += 10;
-        reasons.push('Moderate annual mileage (10-15k km)');
-      }
-      
-      // Good savings potential = higher priority
-      if (annualSavings > 3000) {
-        score += 20;
-        reasons.push('Very high savings potential (>€3000/year)');
-      } else if (annualSavings > 1500) {
-        score += 15;
-        reasons.push('High savings potential (€1500-3000/year)');
-      } else if (annualSavings > 500) {
-        score += 10;
-        reasons.push('Moderate savings potential (€500-1500/year)');
-      }
+      // Savings potential
+      if (annualSavings > 3500) { score += 20; reasons.push('Very high savings potential (>€3500/year)'); }
+      else if (annualSavings > 2000) { score += 15; reasons.push('High savings potential (€2000-3500/year)'); }
+      else if (annualSavings > 800) { score += 10; reasons.push('Moderate savings potential (€800-2000/year)'); }
       
       // Age factor (older vehicles = higher priority)
       const vehicleAge = new Date().getFullYear() - (vehicle.year || 2020);
@@ -215,7 +259,33 @@ const ElectrificationPlanning: React.FC<Props> = ({ vehicles, timeRange }) => {
         reasons.push('Mature vehicle (5-10 years)');
       }
       
-      const paybackPeriod = annualSavings > 0 ? evPrice / annualSavings : 0;
+      // Range feasibility (max daily km vs assumed EV range)
+      let maxDailyKm = 0;
+      if (vehicleTelemetry.length > 1) {
+        let currentDay = new Date(vehicleTelemetry[0].timestamp).toDateString();
+        let acc = 0;
+        for (let i = 1; i < vehicleTelemetry.length; i++) {
+          const prev = vehicleTelemetry[i - 1];
+          const curr = vehicleTelemetry[i];
+          const day = new Date(curr.timestamp).toDateString();
+          const seg = kmBetween(prev.location, curr.location);
+          if (day !== currentDay) {
+            maxDailyKm = Math.max(maxDailyKm, acc);
+            currentDay = day;
+            acc = 0;
+          }
+          acc += seg;
+        }
+        maxDailyKm = Math.max(maxDailyKm, acc);
+      }
+      const ASSUMED_EV_RANGE_KM = 400;
+      if (maxDailyKm > ASSUMED_EV_RANGE_KM) {
+        reasons.push(`Occasional long days (${Math.round(maxDailyKm)} km) may require charging strategy`);
+        score -= 5; // small penalty
+      }
+
+      const effectiveEvPrice = Math.max(0, EV_PRICE - EV_INCENTIVE);
+      const paybackPeriod = annualSavings > 0 ? effectiveEvPrice / annualSavings : 0;
       
       // Payback period factor (shorter payback = higher priority)
       if (paybackPeriod > 0 && paybackPeriod < 5) {
@@ -227,8 +297,8 @@ const ElectrificationPlanning: React.FC<Props> = ({ vehicles, timeRange }) => {
       }
       
       let priority: 'High' | 'Medium' | 'Low';
-      if (score >= 40) priority = 'High';
-      else if (score >= 20) priority = 'Medium';
+      if (score >= 45) priority = 'High';
+      else if (score >= 25) priority = 'Medium';
       else priority = 'Low';
       
       
@@ -239,7 +309,7 @@ const ElectrificationPlanning: React.FC<Props> = ({ vehicles, timeRange }) => {
         score,
         annualEmissions,
         annualFuelCost,
-        projectedEvCost: evPrice,
+        projectedEvCost: EV_PRICE,
         annualSavings,
         co2Reduction,
         paybackPeriod,

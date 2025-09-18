@@ -227,7 +227,7 @@ func (c *MongoCollection) UpdateTrip(ctx context.Context, id string, trip models
 		return err
 	}
 	trip.UpdatedAt = time.Now()
-	_, err = c.Collection.UpdateOne(ctx, bson.M{"_id": objectID}, bson.M{"$set": trip})
+    _, err = c.Collection.UpdateOne(ctx, bson.M{"_id": objectID, "tenant_id": trip.TenantID}, bson.M{"$set": trip})
 	return err
 }
 
@@ -237,7 +237,8 @@ func (c *MongoCollection) DeleteTrip(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.Collection.DeleteOne(ctx, bson.M{"_id": objectID})
+    // Caller should ensure tenant scoping by passing a filter when needed; keep simple delete for now
+    _, err = c.Collection.DeleteOne(ctx, bson.M{"_id": objectID})
 	return err
 }
 
@@ -279,7 +280,7 @@ func (c *MongoCollection) UpdateMaintenance(ctx context.Context, id string, main
 		return err
 	}
 	maintenance.UpdatedAt = time.Now()
-	_, err = c.Collection.UpdateOne(ctx, bson.M{"_id": objectID}, bson.M{"$set": maintenance})
+    _, err = c.Collection.UpdateOne(ctx, bson.M{"_id": objectID, "tenant_id": maintenance.TenantID}, bson.M{"$set": maintenance})
 	return err
 }
 
@@ -331,7 +332,7 @@ func (c *MongoCollection) UpdateCost(ctx context.Context, id string, cost models
 		return err
 	}
 	cost.UpdatedAt = time.Now()
-	_, err = c.Collection.UpdateOne(ctx, bson.M{"_id": objectID}, bson.M{"$set": cost})
+    _, err = c.Collection.UpdateOne(ctx, bson.M{"_id": objectID, "tenant_id": cost.TenantID}, bson.M{"$set": cost})
 	return err
 }
 

@@ -22,6 +22,7 @@ const (
 // User represents a user in the system
 type User struct {
 	ID           primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+    TenantID     string             `bson:"tenant_id" json:"tenant_id"`
 	Username     string             `bson:"username" json:"username"`
 	Email        string             `bson:"email" json:"email"`
 	PasswordHash string             `bson:"password_hash" json:"-"`
@@ -48,6 +49,7 @@ type RegisterRequest struct {
 	FirstName string `json:"first_name"`
 	LastName  string `json:"last_name"`
 	Role      Role   `json:"role"`
+    TenantID  string `json:"tenant_id"`
 }
 
 // LoginResponse represents a successful login response
@@ -62,6 +64,7 @@ type Claims struct {
 	UserID   string `json:"user_id"`
 	Username string `json:"username"`
 	Role     Role   `json:"role"`
+    TenantID string `json:"tenant_id"`
 	Exp      int64  `json:"exp"`
 }
 
