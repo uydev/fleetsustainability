@@ -24,7 +24,7 @@ A modern React TypeScript frontend for the Fleet Sustainability Dashboard that p
 ### Prerequisites
 
 - Node.js 16+ and npm
-- Go backend running on `http://localhost:8080`
+- Go backend running on `http://localhost:8081`
 
 ### Installation
 
@@ -45,7 +45,7 @@ npm start
 Create a `.env` file in the frontend directory:
 
 ```env
-REACT_APP_API_URL=http://localhost:8080
+REACT_APP_API_URL=http://localhost:8081
 ```
 
 ## Project Structure

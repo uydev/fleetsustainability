@@ -2,9 +2,9 @@ name: Go CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, phase4 ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, phase4 ]
 
 jobs:
   lint-vet:
