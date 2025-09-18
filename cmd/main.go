@@ -14,6 +14,7 @@ import (
 	"strconv"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
 	log "github.com/sirupsen/logrus"
 	"github.com/ukydev/fleet-sustainability/internal/auth"
@@ -345,6 +346,55 @@ func (h *SSEHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 var telemetrySSEHub *SSEHub
+
+// --- WebSocket support ---
+var wsUpgrader = websocket.Upgrader{
+    ReadBufferSize:  1024,
+    WriteBufferSize: 1024,
+    CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+func wsTelemetryHandler(w http.ResponseWriter, r *http.Request) {
+    conn, err := wsUpgrader.Upgrade(w, r, nil)
+    if err != nil {
+        http.Error(w, "Upgrade failed", http.StatusBadRequest)
+        return
+    }
+    defer conn.Close()
+
+    // Each WS client gets a channel and optional tenant binding
+    clientCh := make(chan []byte, 16)
+    tenantID := ""
+    if claims, ok := middleware.GetUserFromContext(r.Context()); ok {
+        tenantID = claims.TenantID
+    }
+    telemetrySSEHub.mu.Lock()
+    telemetrySSEHub.clients[clientCh] = tenantID
+    telemetrySSEHub.mu.Unlock()
+    defer func() {
+        telemetrySSEHub.mu.Lock()
+        delete(telemetrySSEHub.clients, clientCh)
+        telemetrySSEHub.mu.Unlock()
+        close(clientCh)
+    }()
+
+    // Pump: we only write server->client; read to drain pings/close
+    go func() {
+        for {
+            if _, _, err := conn.NextReader(); err != nil {
+                _ = conn.Close()
+                return
+            }
+        }
+    }()
+
+    for msg := range clientCh {
+        conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+        if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+            return
+        }
+    }
+}
 
 // TelemetryMetricsHandler handles metrics API requests for telemetry data.
 type TelemetryMetricsHandler struct {
@@ -1401,6 +1451,11 @@ func main() {
 	// SSE endpoint (unauth for now; can wrap with authMiddleware if desired)
 	telemetrySSEHub = NewSSEHub()
 	http.Handle("/api/telemetry/stream", corsMiddleware(telemetrySSEHub))
+	// WebSocket endpoint (auth optional; mirror SSE data)
+	wsEnabled := os.Getenv("WEBSOCKETS_ENABLED")
+	if wsEnabled == "" || strings.ToLower(wsEnabled) == "true" {
+		http.Handle("/api/telemetry/ws", corsMiddleware(authMiddleware.Authenticate(http.HandlerFunc(wsTelemetryHandler))))
+	}
 	http.Handle("/api/vehicles", corsMiddleware(authMiddleware.Authenticate(http.HandlerFunc(vehicleRouter))))
 	http.Handle("/api/vehicles/", corsMiddleware(authMiddleware.Authenticate(http.HandlerFunc(vehicleRouter))))
 	http.Handle("/api/trips", corsMiddleware(authMiddleware.Authenticate(tripHandler)))
