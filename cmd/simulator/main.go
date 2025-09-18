@@ -154,17 +154,15 @@ func snapToRoad(p Location) Location {
 }
 
 func randomLocation() Location {
-	if os.Getenv("SIM_GLOBAL") == "1" {
-		for i := 0; i < 5; i++ {
-			lat := -60 + rand.Float64()*135
-			lon := -180 + rand.Float64()*360
-			p := Location{Lat: lat, Lon: lon}
-			if os.Getenv("SIM_SNAP_TO_ROAD") == "1" {
-				p = snapToRoad(p)
-			}
-			return p
-		}
-	}
+    if os.Getenv("SIM_GLOBAL") == "1" {
+        lat := -60 + rand.Float64()*135
+        lon := -180 + rand.Float64()*360
+        p := Location{Lat: lat, Lon: lon}
+        if os.Getenv("SIM_SNAP_TO_ROAD") == "1" {
+            return snapToRoad(p)
+        }
+        return p
+    }
 	base := cities[rand.Intn(len(cities))]
 	j := jitterLocation(base, 500) // start close to roads
 	if os.Getenv("SIM_SNAP_TO_ROAD") == "1" {
