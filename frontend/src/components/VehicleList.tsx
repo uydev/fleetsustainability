@@ -221,7 +221,7 @@ const VehicleList: React.FC<VehicleListProps> = ({ telemetry, onVehicleFocus }) 
 
   return (
     <Box>
-      <TableContainer component={Paper}>
+      <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
         <Table>
           <TableHead>
             <TableRow>

@@ -54,7 +54,20 @@ class ApiService {
     const params = new URLSearchParams();
     if (timeRange?.from) params.append('from', timeRange.from);
     if (timeRange?.to) params.append('to', timeRange.to);
+    params.append('sort', 'asc');
+    params.append('limit', '0');
 
+    const response = await this.api.get(`/api/telemetry?${params.toString()}`);
+    return response.data || [];
+  }
+
+  async getTelemetryByVehicle(vehicleId: string, timeRange?: TimeRange): Promise<Telemetry[]> {
+    const params = new URLSearchParams();
+    if (timeRange?.from) params.append('from', timeRange.from);
+    if (timeRange?.to) params.append('to', timeRange.to);
+    params.append('vehicle_id', vehicleId);
+    params.append('sort', 'asc');
+    params.append('limit', '0');
     const response = await this.api.get(`/api/telemetry?${params.toString()}`);
     return response.data || [];
   }
@@ -73,6 +86,13 @@ class ApiService {
     return response.data || { total_emissions: 0, ev_percent: 0, total_records: 0 };
   }
 
+  async getAdvancedMetrics(timeRange?: TimeRange): Promise<any> {
+    const params = new URLSearchParams();
+    if (timeRange?.from) params.append('from', timeRange.from);
+    const response = await this.api.get(`/api/telemetry/metrics/advanced?${params.toString()}`);
+    return response.data || {};
+  }
+
   // Vehicles endpoints
   async getVehicles(timeRange?: TimeRange): Promise<Vehicle[]> {
     const params = new URLSearchParams();
@@ -80,6 +100,15 @@ class ApiService {
     if (timeRange?.to) params.append('to', timeRange.to);
     
     const response = await this.api.get(`/api/vehicles?${params.toString()}`);
+    return response.data || [];
+  }
+
+  // Alerts
+  async getAlerts(timeRange?: TimeRange): Promise<Array<{type:string; vehicle_id:string; value:number; ts:string}>> {
+    const params = new URLSearchParams();
+    if (timeRange?.from) params.append('from', timeRange.from);
+    if (timeRange?.to) params.append('to', timeRange.to);
+    const response = await this.api.get(`/api/alerts?${params.toString()}`);
     return response.data || [];
   }
 

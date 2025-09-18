@@ -8,6 +8,7 @@ import (
 // Trip represents a vehicle trip from start to end location.
 type Trip struct {
 	ID                 primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+    TenantID           string             `json:"tenant_id" bson:"tenant_id"`
 	VehicleID          string             `json:"vehicle_id" bson:"vehicle_id"`
 	DriverID           string             `json:"driver_id" bson:"driver_id"`
 	StartLocation      Location           `json:"start_location" bson:"start_location"`

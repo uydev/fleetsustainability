@@ -18,6 +18,9 @@ import {
 import { AccountCircle, Logout } from '@mui/icons-material';
 import WorldMap, { WorldMapRef } from './WorldMap';
 import MetricsPanel from './MetricsPanel';
+import VehicleDetail from './VehicleDetail';
+import AdvancedMetrics from './AdvancedMetrics';
+import Leaderboard from './Leaderboard';
 import VehicleList from './VehicleList';
 import TimeRangeSelector from './TimeRangeSelector';
 import FleetManagement from './FleetManagement';
@@ -26,6 +29,8 @@ import TripManagement from './TripManagement';
 import MaintenanceManagement from './MaintenanceManagement';
 import CostManagement from './CostManagement';
 import LiveView from './LiveView';
+import ElectrificationPlanning from './ElectrificationPlanning';
+import DriverEfficiencyLeaderboard from './DriverEfficiencyLeaderboard';
 import apiService from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { Telemetry, FleetMetrics, Vehicle } from '../types';
@@ -65,6 +70,9 @@ const Dashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [tabValue, setTabValue] = useState(0);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [currentTimeRange, setCurrentTimeRange] = useState<{ from?: string; to?: string }>({});
+  const [alerts, setAlerts] = useState<Array<{type:string; vehicle_id:string; value:number; ts:string}>>([]);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   
   // Reference to the WorldMap component
   const worldMapRef = useRef<WorldMapRef>(null);
@@ -75,6 +83,30 @@ const Dashboard: React.FC = () => {
       worldMapRef.current.focusOnVehicle(vehicleId);
     }
   };
+
+  // Function to navigate to Vehicle Detail tab with specific vehicle ID
+  const handleNavigateToVehicleDetail = (vehicleId: string) => {
+    setSelectedVehicleId(vehicleId);
+    setTabValue(2); // Vehicle Detail tab is at index 2
+  };
+
+  const handleTimeRangeChange = useCallback(async (timeRange: { from?: string; to?: string }) => {
+    setCurrentTimeRange(timeRange);
+    setLoading(true);
+    try {
+      const [telemetryData, metricsData] = await Promise.all([
+        apiService.getTelemetry(timeRange),
+        apiService.getFleetMetrics(timeRange),
+      ]);
+      setTelemetry(telemetryData);
+      setMetrics(metricsData);
+    } catch (err) {
+      console.error('Error loading filtered data:', err);
+      setError('Failed to load filtered data. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   const loadDashboardData = useCallback(async () => {
     setLoading(true);
@@ -100,25 +132,11 @@ const Dashboard: React.FC = () => {
     loadDashboardData();
   }, [loadDashboardData]);
 
-  const [currentTimeRange, setCurrentTimeRange] = useState<{ from?: string; to?: string }>({});
-
-  const handleTimeRangeChange = useCallback(async (timeRange: { from?: string; to?: string }) => {
-    setCurrentTimeRange(timeRange);
-    setLoading(true);
-    try {
-      const [telemetryData, metricsData] = await Promise.all([
-        apiService.getTelemetry(timeRange),
-        apiService.getFleetMetrics(timeRange),
-      ]);
-      setTelemetry(telemetryData);
-      setMetrics(metricsData);
-    } catch (err) {
-      console.error('Error loading filtered data:', err);
-      setError('Failed to load filtered data. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  useEffect(() => {
+    // Refresh alerts whenever time range changes
+    const tr = currentTimeRange;
+    apiService.getAlerts(tr && (tr.from || tr.to) ? tr : undefined).then(setAlerts).catch(() => setAlerts([]));
+  }, [currentTimeRange.from, currentTimeRange.to]);
 
   // Build a telemetry array aligned 1:1 with registered vehicles
   // Uses the latest telemetry per vehicle when available, otherwise falls back to the vehicle's current_location
@@ -159,6 +177,10 @@ const Dashboard: React.FC = () => {
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
+    // Clear selected vehicle ID when switching away from Vehicle Detail tab
+    if (newValue !== 2) {
+      setSelectedVehicleId(null);
+    }
   };
 
   const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
@@ -237,66 +259,127 @@ const Dashboard: React.FC = () => {
           </Box>
         </Toolbar>
       </AppBar>
-      <Container maxWidth="xl" sx={{ py: 4 }}>
+      <Container maxWidth="xl" sx={{ py: { xs: 2, sm: 3, md: 4 }, px: { xs: 1, sm: 2 } }}>
 
       <TimeRangeSelector onTimeRangeChange={handleTimeRangeChange} />
 
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
-        <Tabs value={tabValue} onChange={handleTabChange} aria-label="dashboard tabs">
+        <Tabs 
+          value={tabValue} 
+          onChange={handleTabChange} 
+          aria-label="dashboard tabs"
+          variant="scrollable"
+          scrollButtons="auto"
+          allowScrollButtonsMobile
+          sx={{
+            '& .MuiTab-root': {
+              minWidth: 'auto',
+              px: 1.5,
+              fontSize: '0.875rem',
+            },
+            '& .MuiTabs-scrollButtons': {
+              '&.Mui-disabled': {
+                opacity: 0.3,
+              },
+            },
+          }}
+        >
           <Tab label="Fleet Overview" />
           <Tab label="Live View" />
+          <Tab label="Vehicle Detail" />
+          <Tab label="Alerts" />
           <Tab label="Fleet Management" />
           <Tab label="Telemetry Management" />
           <Tab label="Trip Management" />
-          <Tab label="Maintenance" />
           <Tab label="Cost Management" />
+          <Tab label="Maintenance" />
+          <Tab label="Electrification" />
+          <Tab label="Driver Leaderboard" />
         </Tabs>
       </Box>
 
       <TabPanel value={tabValue} index={0}>
-        <Grid container spacing={3}>
+        <Grid container spacing={{ xs: 2, sm: 3 }}>
           <Grid item xs={12} lg={8}>
-            <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <Paper sx={{ p: { xs: 1, sm: 2 }, height: { xs: '400px', sm: '500px', md: '100%' }, display: 'flex', flexDirection: 'column' }}>
               <Box sx={{ flex: 1, minHeight: 0 }}>
                 <WorldMap ref={worldMapRef} telemetry={overviewTelemetry} />
               </Box>
             </Paper>
           </Grid>
           <Grid item xs={12} lg={4}>
-            <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <Paper sx={{ p: { xs: 1, sm: 2 }, height: { xs: 'auto', lg: '100%' }, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               <Box sx={{ flex: 1, overflow: 'auto' }}>
                 <MetricsPanel metrics={metrics} />
+                <Box mt={2}>
+                  <AdvancedMetrics timeRange={currentTimeRange} />
+                </Box>
               </Box>
             </Paper>
           </Grid>
           <Grid item xs={12}>
             <VehicleList telemetry={overviewTelemetry} onVehicleFocus={handleVehicleFocus} />
           </Grid>
+          <Grid item xs={12}>
+            <Leaderboard latest={overviewTelemetry} />
+          </Grid>
         </Grid>
       </TabPanel>
 
-      <TabPanel value={tabValue} index={1}>
-        <LiveView />
-      </TabPanel>
+        <TabPanel value={tabValue} index={1}>
+          <LiveView onNavigateToVehicleDetail={handleNavigateToVehicleDetail} />
+        </TabPanel>
 
       <TabPanel value={tabValue} index={2}>
-        <FleetManagement timeRange={currentTimeRange} />
+        <VehicleDetail vehicles={vehicles} timeRange={currentTimeRange} selectedVehicleId={selectedVehicleId} />
       </TabPanel>
 
       <TabPanel value={tabValue} index={3}>
-        <TelemetryManagement timeRange={currentTimeRange} />
+        <Paper sx={{ p:2 }}>
+          <Typography variant="h6" gutterBottom>
+            Alerts {currentTimeRange.from || currentTimeRange.to ? '(filtered)' : '(last hour)'}
+          </Typography>
+          {alerts.length === 0 ? (
+            <Typography color="text.secondary">No alerts.</Typography>
+          ) : (
+            <Box display="flex" flexDirection="column" gap={1}>
+              {alerts.map((a, i) => (
+                <Box key={i} display="flex" justifyContent="space-between">
+                  <Typography variant="body2">{a.type.replace('_',' ')} – Vehicle {a.vehicle_id}</Typography>
+                  <Typography variant="body2">{new Date(a.ts).toLocaleString()}</Typography>
+                </Box>
+              ))}
+            </Box>
+          )}
+        </Paper>
       </TabPanel>
 
       <TabPanel value={tabValue} index={4}>
-        <TripManagement timeRange={currentTimeRange} />
+        <FleetManagement timeRange={currentTimeRange} />
       </TabPanel>
 
       <TabPanel value={tabValue} index={5}>
-        <MaintenanceManagement timeRange={currentTimeRange} />
+        <TelemetryManagement timeRange={currentTimeRange} />
       </TabPanel>
 
       <TabPanel value={tabValue} index={6}>
+        <TripManagement timeRange={currentTimeRange} />
+      </TabPanel>
+
+      <TabPanel value={tabValue} index={7}>
         <CostManagement timeRange={currentTimeRange} />
+      </TabPanel>
+
+      <TabPanel value={tabValue} index={8}>
+        <MaintenanceManagement timeRange={currentTimeRange} />
+      </TabPanel>
+
+      <TabPanel value={tabValue} index={9}>
+        <ElectrificationPlanning vehicles={vehicles} timeRange={currentTimeRange} />
+      </TabPanel>
+
+      <TabPanel value={tabValue} index={10}>
+        <DriverEfficiencyLeaderboard timeRange={currentTimeRange} vehicles={vehicles} telemetry={telemetry} />
       </TabPanel>
     </Container>
     </>

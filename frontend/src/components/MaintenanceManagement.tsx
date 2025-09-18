@@ -13,9 +13,12 @@ import {
   Chip,
   Alert,
   Snackbar,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
 import {
   Add as AddIcon,
+  Delete as DeleteIcon,
 } from '@mui/icons-material';
 import MaintenanceForm from './MaintenanceForm';
 import apiService from '../services/api';
@@ -72,6 +75,19 @@ const MaintenanceManagement: React.FC<MaintenanceManagementProps> = ({ timeRange
         message: 'Failed to create maintenance record',
         severity: 'error',
       });
+    }
+  };
+
+  const handleDeleteMaintenance = async (id: string) => {
+    const ok = window.confirm('Delete this maintenance record?');
+    if (!ok) return;
+    try {
+      await apiService.deleteMaintenance(id);
+      setSnackbar({ open: true, message: 'Maintenance deleted', severity: 'success' });
+      loadMaintenance();
+    } catch (error) {
+      console.error('Error deleting maintenance:', error);
+      setSnackbar({ open: true, message: 'Failed to delete maintenance', severity: 'error' });
     }
   };
 
@@ -134,7 +150,7 @@ const MaintenanceManagement: React.FC<MaintenanceManagementProps> = ({ timeRange
             No maintenance records found. Add your first maintenance record to get started.
           </Typography>
         ) : (
-          <TableContainer>
+          <TableContainer sx={{ overflowX: 'auto' }}>
             <Table>
               <TableHead>
                 <TableRow>
@@ -146,6 +162,7 @@ const MaintenanceManagement: React.FC<MaintenanceManagementProps> = ({ timeRange
                   <TableCell>Cost ($)</TableCell>
                   <TableCell>Status</TableCell>
                   <TableCell>Priority</TableCell>
+                  <TableCell>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -170,6 +187,13 @@ const MaintenanceManagement: React.FC<MaintenanceManagementProps> = ({ timeRange
                         color={getPriorityColor(record.priority) as any}
                         size="small"
                       />
+                    </TableCell>
+                    <TableCell>
+                      <Tooltip title="Delete">
+                        <IconButton size="small" onClick={() => handleDeleteMaintenance(record.id!)}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                     </TableCell>
                   </TableRow>
                 ))}

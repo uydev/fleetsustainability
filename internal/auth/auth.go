@@ -75,6 +75,7 @@ func (s *Service) GenerateToken(user *models.User) (string, error) {
 		"user_id":  user.ID.Hex(),
 		"username": user.Username,
 		"role":     string(user.Role),
+        "tenant_id": user.TenantID,
 		"exp":      time.Now().Add(s.tokenExp).Unix(),
 		"iat":      time.Now().Unix(),
 	}
@@ -141,12 +142,15 @@ func (s *Service) ValidateToken(tokenString string) (*models.Claims, error) {
 		return nil, ErrInvalidToken
 	}
 
-	return &models.Claims{
-		UserID:   userID,
-		Username: username,
-		Role:     models.Role(roleStr),
-		Exp:      int64(exp),
-	}, nil
+    tenantID, _ := claims["tenant_id"].(string)
+
+    return &models.Claims{
+        UserID:   userID,
+        Username: username,
+        Role:     models.Role(roleStr),
+        TenantID: tenantID,
+        Exp:      int64(exp),
+    }, nil
 }
 
 // ExtractTokenFromHeader extracts token from Authorization header

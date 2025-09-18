@@ -13,9 +13,12 @@ import {
   Chip,
   Alert,
   Snackbar,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
 import {
   Add as AddIcon,
+  Delete as DeleteIcon,
 } from '@mui/icons-material';
 import CostForm from './CostForm';
 import apiService from '../services/api';
@@ -72,6 +75,19 @@ const CostManagement: React.FC<CostManagementProps> = ({ timeRange }) => {
         message: 'Failed to create cost record',
         severity: 'error',
       });
+    }
+  };
+
+  const handleDeleteCost = async (id: string) => {
+    const ok = window.confirm('Delete this cost record?');
+    if (!ok) return;
+    try {
+      await apiService.deleteCost(id);
+      setSnackbar({ open: true, message: 'Cost deleted', severity: 'success' });
+      loadCosts();
+    } catch (error) {
+      console.error('Error deleting cost:', error);
+      setSnackbar({ open: true, message: 'Failed to delete cost', severity: 'error' });
     }
   };
 
@@ -157,6 +173,7 @@ const CostManagement: React.FC<CostManagementProps> = ({ timeRange }) => {
                   <TableCell>Vendor</TableCell>
                   <TableCell>Payment Method</TableCell>
                   <TableCell>Status</TableCell>
+                  <TableCell>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -181,6 +198,13 @@ const CostManagement: React.FC<CostManagementProps> = ({ timeRange }) => {
                         color={getStatusColor(cost.status) as any}
                         size="small"
                       />
+                    </TableCell>
+                    <TableCell>
+                      <Tooltip title="Delete">
+                        <IconButton size="small" onClick={() => handleDeleteCost(cost.id!)}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                     </TableCell>
                   </TableRow>
                 ))}

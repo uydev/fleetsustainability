@@ -98,4 +98,30 @@ export interface ApiResponse<T> {
 export interface TimeRange {
   from?: string;
   to?: string;
-} 
+}
+
+// Driver efficiency leaderboard types
+export interface DriverEfficiency {
+  driver_id: string;
+  driver_name: string;
+  total_distance: number;
+  total_fuel_consumed: number;
+  total_emissions: number;
+  average_speed: number;
+  efficiency_score: number;
+  fuel_efficiency: number;
+  emission_efficiency: number;
+  safety_score: number;
+  trips_completed: number;
+  total_driving_time: number;
+  rank: number;
+  improvement_since_last_period: number;
+  badges: string[];
+}
+
+export interface DriverLeaderboard {
+  drivers: DriverEfficiency[];
+  period: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  total_drivers: number;
+  last_updated: string;
+}
