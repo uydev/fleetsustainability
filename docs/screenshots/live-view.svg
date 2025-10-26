@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675">
+  <rect width="1200" height="675" fill="#0ea5e9"/>
+  <rect x="32" y="32" width="1136" height="611" rx="16" fill="white" opacity="0.92"/>
+  <text x="56" y="88" font-family="Arial, Helvetica, sans-serif" font-size="36" fill="#0f172a" font-weight="700">Live View (Placeholder)</text>
+  <rect x="56" y="120" width="1088" height="500" rx="12" fill="#f1f5f9" stroke="#e2e8f0"/>
+  <circle cx="200" cy="260" r="8" fill="#22c55e"/>
+  <circle cx="420" cy="310" r="8" fill="#ef4444"/>
+  <circle cx="780" cy="380" r="8" fill="#22c55e"/>
+  <circle cx="980" cy="260" r="8" fill="#f59e0b"/>
+  <text x="56" y="644" font-size="14" fill="#64748b" font-family="Arial">Replace with real screenshot at docs/screenshots/live-view.svg</text>
+</svg>
+

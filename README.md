@@ -1,46 +1,83 @@
-# Fleet Sustainability Dashboard (IoT Simulation)
+# Fleet Sustainability Dashboard
 
-This project is a Go backend service for the Fleet Sustainability Dashboard, designed to simulate IoT data and provide analytics for fleet management and sustainability tracking.
+Simulates a vehicle fleet, ingests telemetry, and provides real-time insights (fuel/emissions, electrification planning, costs, maintenance, alerts). Backend in Go, frontend in React+TS, MongoDB for persistence. Real-time via SSE/WebSockets, optional MQTT.
 
 ## Project Structure
-- `cmd/` — Main application entry points
-- `internal/` — Private application and library code
-- `pkg/` — Public libraries for use by other projects
-- `api/` — API definitions and documentation
-- `scripts/` — Helper scripts for development and operations
-- `build/` — Packaging and CI/CD configurations
-- `configs/` — Configuration files
-- `test/` — External tests and test data
+- `cmd/` — backend entrypoints (HTTP API, simulator)
+- `internal/` — backend domain, handlers, db
+- `frontend/` — React app
+- `scripts/` — dev ops script (`scripts/fleet_sustainability.sh`)
+- `configs/` — config files (e.g., Mosquitto)
+- `docker-compose.yml` — dev stack (backend, mongo, mongo-express, mosquitto)
+- `docker-compose.prod.yml` — prod stack (backend, frontend nginx, mongo, mosquitto)
+
+## Architecture
+
+
+```
 
 ## Features
-- IoT data simulation for fleet vehicles
-- RESTful API for data access and analytics
-- Modular, idiomatic Go codebase
-- Security best practices (input validation, JWT auth, HTTPS)
-- Ready for CI/CD and containerized deployment
+- Telemetry ingest (HTTP POST, MQTT), storage (Mongo), queries (filters, metrics)
+- Real-time updates: SSE + WebSockets; MQTT broker included (Mosquitto)
+- Multi-tenant support (`tenant_id` in JWT, middleware, queries)
+- Trip/Maintenance/Cost CRUD, deletes, and tenant scoping
+- Electrification planning, driver leaderboard, CSV/PDF exports
+- Mobile/responsive UI
 
-## Stateless, Horizontally Scalable Design
-This backend is designed to be stateless and horizontally scalable:
-- All state is stored in external systems (MongoDB, etc.), not in memory.
-- No session or user state is kept in the application process.
-- Multiple instances can be run behind a load balancer for high availability and scale-out.
-- Configuration is via environment variables or .env files, supporting container orchestration.
+## Prerequisites
+- Docker + Docker Compose (recommended)
+- Node 18+ and Go (if running locally outside containers)
+
+## Quick start (dev)
+```bash
+./scripts/fleet_sustainability.sh start     # start backend+deps and frontend
+./scripts/fleet_sustainability.sh sim-start # start simulator (MQTT by default)
+```
+
+URLs: Frontend http://localhost:3000, API http://localhost:8081, Mongo Express http://localhost:8082, MQTT tcp://localhost:1883
+
+## Environment
+Backend:
+- MONGO_URI (default mongo service), MONGO_DB (fleet), JWT_SECRET, TELEMETRY_TTL_DAYS, WEBSOCKETS_ENABLED
+- MQTT_BROKER_URL (docker: tcp://mosquitto:1883, host: tcp://localhost:1883), MQTT_TELEMETRY_TOPIC
+
+Frontend (build-time):
+- REACT_APP_API_URL (default http://localhost:8081)
+- REACT_APP_SSE_URL, REACT_APP_WS_URL
+
+Simulator:
+- SIM_USE_MQTT=1, FLEET_SIZE, SIM_TICK_SECONDS
+
+## Production
+```bash
+docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml up -d
+```
+Services: `app` (Go API 8080 internal), `frontend` (nginx 3000), `mongo`, `mosquitto`.
 
 ## API Authentication
-All main API endpoints require a JWT Bearer token in the `Authorization` header. Set the `JWT_SECRET` environment variable to configure the secret.
+JWT Bearer tokens required for protected endpoints. Obtain via `/api/auth/login` (script creates admin/admin123).
 
-## HTTPS Support
-Set `USE_HTTPS=true` and provide `TLS_CERT_FILE` and `TLS_KEY_FILE` environment variables to enable HTTPS in production.
+## Screenshots
+Place images in `docs/screenshots/` using these filenames, then uncomment the sample links below.
 
-## Quick API Usage Example
+Expected files:
+
 ```
-curl -H "Authorization: Bearer <your-jwt>" https://localhost:8080/api/telemetry
+docs/
+  screenshots/
+    dashboard.png
+    live-view.png
+    electrification.png
+    vehicles.png
 ```
 
-## Getting Started
-1. Clone the repository
-2. Run `go mod tidy` to install dependencies
-3. Build and run the main application in `cmd/`
+<!--
+![Dashboard](docs/screenshots/dashboard.png)
+![Live View](docs/screenshots/live-view.png)
+![Electrification](docs/screenshots/electrification.png)
+![Vehicles](docs/screenshots/vehicles.png)
+-->
 
 ## License
-MIT 
+MIT

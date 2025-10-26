@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675">
+  <rect width="1200" height="675" fill="#1f2937"/>
+  <rect x="32" y="32" width="1136" height="611" rx="16" fill="white" opacity="0.96"/>
+  <text x="56" y="88" font-family="Arial, Helvetica, sans-serif" font-size="36" fill="#0f172a" font-weight="700">Vehicles (Placeholder)</text>
+  <rect x="56" y="120" width="1088" height="500" rx="12" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="80" y="160" font-size="20" fill="#334155" font-family="Arial">Table</text>
+  <text x="56" y="644" font-size="14" fill="#64748b" font-family="Arial">Replace with real screenshot at docs/screenshots/vehicles.svg</text>
+</svg>
+
