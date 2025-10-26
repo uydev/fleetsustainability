@@ -1,16 +1,5 @@
 import React, { useState } from 'react';
-import {
-  Box,
-  Card,
-  CardContent,
-  TextField,
-  Button,
-  Typography,
-  Alert,
-  CircularProgress,
-  Container,
-  Paper,
-} from '@mui/material';
+import { Box, TextField, Button, Typography, Alert, CircularProgress, Container, Paper } from '@mui/material';
 import { apiService } from '../services/api';
 
 interface LoginProps {

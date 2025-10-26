@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Button,
@@ -38,7 +38,7 @@ const TripManagement: React.FC<TripManagementProps> = ({ timeRange }) => {
     severity: 'success' | 'error';
   }>({ open: false, message: '', severity: 'success' });
 
-  const loadTrips = async () => {
+  const loadTrips = useCallback(async () => {
     setLoading(true);
     try {
       const data = await apiService.getTrips(timeRange);
@@ -53,11 +53,11 @@ const TripManagement: React.FC<TripManagementProps> = ({ timeRange }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [timeRange]);
 
   useEffect(() => {
     loadTrips();
-  }, [timeRange]);
+  }, [loadTrips]);
 
   const handleAddTrip = async (tripData: Omit<Trip, 'id'>) => {
     try {

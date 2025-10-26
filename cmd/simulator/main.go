@@ -75,14 +75,33 @@ var cities = []Location{
 // SIM_CITIES_FILE: path to JSON array of objects {"lat": number, "lon": number}
 // SIM_EXTRA_CITIES: semicolon-separated list of "lat,lon" pairs (e.g., "35.68,139.65;28.61,77.20")
 func loadExtraCities() {
+    // If SIM_ONLY_CITIES=1 and at least one extra city is supplied, replace the built-ins
+    only := os.Getenv("SIM_ONLY_CITIES") == "1"
     added := 0
+    var extraCities []Location
+
+    // Helper: validate coordinate bounds
+    isValid := func(lat, lon float64) bool {
+        if math.IsNaN(lat) || math.IsNaN(lon) || math.IsInf(lat, 0) || math.IsInf(lon, 0) {
+            return false
+        }
+        if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
+            return false
+        }
+        // Avoid null island (0,0) which is ocean
+        if lat == 0 && lon == 0 {
+            return false
+        }
+        return true
+    }
+
     if path := os.Getenv("SIM_CITIES_FILE"); path != "" {
         if data, err := os.ReadFile(path); err == nil {
             var arr []struct{ Lat float64 `json:"lat"`; Lon float64 `json:"lon"` }
             if err := json.Unmarshal(data, &arr); err == nil {
                 for _, c := range arr {
-                    if c.Lat != 0 || c.Lon != 0 {
-                        cities = append(cities, Location{Lat: c.Lat, Lon: c.Lon})
+                    if isValid(c.Lat, c.Lon) {
+                        extraCities = append(extraCities, Location{Lat: c.Lat, Lon: c.Lon})
                         added++
                     }
                 }
@@ -93,19 +112,27 @@ func loadExtraCities() {
             log.WithError(err).Warn("Failed to read SIM_CITIES_FILE")
         }
     }
+
     if extra := os.Getenv("SIM_EXTRA_CITIES"); extra != "" {
         for _, part := range strings.Split(extra, ";") {
             fields := strings.Split(strings.TrimSpace(part), ",")
             if len(fields) != 2 { continue }
             lat, err1 := strconv.ParseFloat(strings.TrimSpace(fields[0]), 64)
             lon, err2 := strconv.ParseFloat(strings.TrimSpace(fields[1]), 64)
-            if err1 == nil && err2 == nil {
-                cities = append(cities, Location{Lat: lat, Lon: lon})
+            if err1 == nil && err2 == nil && isValid(lat, lon) {
+                extraCities = append(extraCities, Location{Lat: lat, Lon: lon})
                 added++
             }
         }
     }
+
+    if only && added > 0 {
+        cities = extraCities
+        log.WithField("replaced_cities", len(cities)).Info("Using only supplied cities for simulator")
+        return
+    }
     if added > 0 {
+        cities = append(cities, extraCities...)
         log.WithField("added_cities", added).Info("Loaded extra cities for simulator")
     }
 }
@@ -492,17 +519,38 @@ func simulateVehicle(apiURL string, s *VehicleState, interval time.Duration) {
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	for range tick.C {
-		// Random stops and dwell logic: guarantee explicit 0-speed samples while dwelling
-		if time.Now().After(s.StopUntil) && rand.Float64() < 0.02 {
-			s.StopUntil = time.Now().Add(time.Duration(10+rand.Intn(35)) * time.Second)
-			s.TargetSpeedKmh = 0
-		}
-		if time.Now().Before(s.StopUntil) {
-			s.TargetSpeedKmh = 0
-			s.SpeedKmh = 0
-		} else {
+        // Random stops and dwell logic (can be disabled via SIM_NO_DWELL)
+        if os.Getenv("SIM_NO_DWELL") != "1" {
+            if time.Now().After(s.StopUntil) && rand.Float64() < 0.02 {
+                s.StopUntil = time.Now().Add(time.Duration(10+rand.Intn(35)) * time.Second)
+                s.TargetSpeedKmh = 0
+            }
+            if time.Now().Before(s.StopUntil) {
+                s.TargetSpeedKmh = 0
+                s.SpeedKmh = 0
+            } else {
+                if s.TargetSpeedKmh == 0 {
+                    s.TargetSpeedKmh = 20 + rand.Float64()*30
+                }
+                s.TargetSpeedKmh += (rand.Float64()*2 - 1) * 1.0
+                if s.TargetSpeedKmh < 0 { s.TargetSpeedKmh = 0 }
+                if s.TargetSpeedKmh > simMaxSpeedKmh { s.TargetSpeedKmh = simMaxSpeedKmh }
+
+                // Accelerate/decelerate towards target with rate limit
+                maxDelta := simAccelKmhPerSec * interval.Seconds()
+                delta := s.TargetSpeedKmh - s.SpeedKmh
+                if delta > maxDelta {
+                    s.SpeedKmh += maxDelta
+                } else if delta < -maxDelta {
+                    s.SpeedKmh -= maxDelta
+                } else {
+                    s.SpeedKmh = s.TargetSpeedKmh
+                }
+                if s.SpeedKmh < 0 { s.SpeedKmh = 0 }
+            }
+        } else {
 			if s.TargetSpeedKmh == 0 {
-				s.TargetSpeedKmh = 20 + rand.Float64()*30
+                s.TargetSpeedKmh = 20 + rand.Float64()*30
 			}
 			s.TargetSpeedKmh += (rand.Float64()*2 - 1) * 1.0
 			if s.TargetSpeedKmh < 0 { s.TargetSpeedKmh = 0 }
@@ -518,7 +566,8 @@ func simulateVehicle(apiURL string, s *VehicleState, interval time.Duration) {
 			} else {
 				s.SpeedKmh = s.TargetSpeedKmh
 			}
-			if s.SpeedKmh < 0 { s.SpeedKmh = 0 }
+            // Enforce a minimum movement speed when dwell is disabled
+            if s.SpeedKmh < 5 { s.SpeedKmh = 5 }
 		}
 
 		stepAlongRoute(s, interval.Seconds())

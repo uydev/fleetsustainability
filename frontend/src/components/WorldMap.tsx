@@ -192,13 +192,7 @@ const WorldMap = forwardRef<WorldMapRef, WorldMapProps>(({ telemetry, onNavigate
     className: 'custom-div-icon',
   });
 
-  const chargingStationIcon = new L.Icon({
-    iconUrl: '/charging-station-icon.svg',
-    iconSize: [32, 32],
-    iconAnchor: [16, 30],
-    popupAnchor: [0, -30],
-    className: 'custom-div-icon',
-  });
+  // chargingStationIcon removed (unused)
 
   // Sample vehicle data if no telemetry provided
   const sampleVehicles: Telemetry[] = [

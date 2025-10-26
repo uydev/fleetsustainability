@@ -170,7 +170,7 @@ const VehicleDetail: React.FC<Props> = ({ vehicles, timeRange, selectedVehicleId
     return aggregated;
   }, [data, selectedType, rangeMs, spanMs]);
 
-  const hasData = useMemo(() => chartData.some(d => d.speed !== null || d.emissions !== null || d.fuel !== undefined || d.battery !== undefined), [chartData]);
+  // note: removed unused hasData calculation to satisfy linter
 
   const formatTick = (v: number) => {
     const d = new Date(v);

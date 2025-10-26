@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Button,
@@ -38,7 +38,7 @@ const MaintenanceManagement: React.FC<MaintenanceManagementProps> = ({ timeRange
     severity: 'success' | 'error';
   }>({ open: false, message: '', severity: 'success' });
 
-  const loadMaintenance = async () => {
+  const loadMaintenance = useCallback(async () => {
     setLoading(true);
     try {
       const data = await apiService.getMaintenance(timeRange);
@@ -53,11 +53,11 @@ const MaintenanceManagement: React.FC<MaintenanceManagementProps> = ({ timeRange
     } finally {
       setLoading(false);
     }
-  };
+  }, [timeRange]);
 
   useEffect(() => {
     loadMaintenance();
-  }, [timeRange]);
+  }, [loadMaintenance]);
 
   const handleAddMaintenance = async (maintenanceData: Omit<Maintenance, 'id'>) => {
     try {

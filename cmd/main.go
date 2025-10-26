@@ -164,7 +164,9 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			if data, err := json.Marshal(eventPayload); err == nil {
                 if claims, ok := middleware.GetUserFromContext(r.Context()); ok && claims.TenantID != "" {
+                    // Send to tenant-scoped listeners and also to global listeners (unauth SSE clients in dev)
                     telemetrySSEHub.BroadcastToTenant(claims.TenantID, data)
+                    telemetrySSEHub.Broadcast(data)
                 } else {
                     telemetrySSEHub.Broadcast(data)
                 }
@@ -1609,13 +1611,15 @@ func main() {
 					"type":          teleIn.Type,
 					"status":        teleIn.Status,
 				}
-				if data, err := json.Marshal(eventPayload); err == nil {
-					if telemetrySSEHub != nil && tele.TenantID != "" {
-						telemetrySSEHub.BroadcastToTenant(tele.TenantID, data)
-					} else if telemetrySSEHub != nil {
-						telemetrySSEHub.Broadcast(data)
-					}
-				}
+                if data, err := json.Marshal(eventPayload); err == nil {
+                    if telemetrySSEHub != nil && tele.TenantID != "" {
+                        // Send to tenant listeners and also to global listeners (unauth SSE clients in dev)
+                        telemetrySSEHub.BroadcastToTenant(tele.TenantID, data)
+                        telemetrySSEHub.Broadcast(data)
+                    } else if telemetrySSEHub != nil {
+                        telemetrySSEHub.Broadcast(data)
+                    }
+                }
 			}
 			if token := client.Subscribe(mqttTopic, 1, cb); token.Wait() && token.Error() != nil {
 				log.WithError(token.Error()).Error("MQTT subscribe failed")
