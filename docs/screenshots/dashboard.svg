@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0ea5e9"/>
+      <stop offset="100%" stop-color="#22c55e"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="675" fill="url(#g)"/>
+  <rect x="40" y="40" width="1120" height="595" rx="16" fill="white" opacity="0.9"/>
+  <text x="60" y="95" font-family="Arial, Helvetica, sans-serif" font-size="36" fill="#0f172a" font-weight="700">Fleet Sustainability — Dashboard (Placeholder)</text>
+  <rect x="60" y="120" width="520" height="220" rx="12" fill="#f1f5f9" stroke="#e2e8f0"/>
+  <text x="80" y="160" font-size="20" fill="#334155" font-family="Arial">Metrics</text>
+  <rect x="60" y="360" width="520" height="240" rx="12" fill="#f1f5f9" stroke="#e2e8f0"/>
+  <text x="80" y="400" font-size="20" fill="#334155" font-family="Arial">Chart</text>
+  <rect x="600" y="120" width="560" height="480" rx="12" fill="#f1f5f9" stroke="#e2e8f0"/>
+  <text x="620" y="160" font-size="20" fill="#334155" font-family="Arial">Map</text>
+  <text x="60" y="650" font-size="14" fill="#64748b" font-family="Arial">Replace this placeholder by adding a real screenshot to docs/screenshots/dashboard.svg or update README.</text>
+</svg>
+

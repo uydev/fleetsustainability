@@ -784,6 +784,28 @@ clear_database() {
     
     print_status "   Authentication successful"
 
+    # Ensure routing is available for snapping-to-road in populate modes
+    OSRM_EFF_URL=${OSRM_BASE_URL:-https://router.project-osrm.org}
+    CODE=$(curl -s -o /dev/null -w '%{http_code}' "$OSRM_EFF_URL/route/v1/driving/0,0;0.1,0.1?overview=false" || echo 000)
+    if [ "$CODE" != "200" ]; then
+        print_warning "Public OSRM not reachable (HTTP $CODE); attempting local OSRM..."
+        start_local_osrm || true
+        OSRM_EFF_URL="http://localhost:5000"
+        for i in {1..20}; do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "$OSRM_EFF_URL/route/v1/driving/7.41,43.73;7.42,43.74?overview=false" || echo 000)
+            [ "$CODE" = "200" ] && break
+            sleep 1
+        done
+    fi
+    if [ "$CODE" = "200" ]; then
+        export OSRM_BASE_URL="$OSRM_EFF_URL"
+        ENFORCE_SNAP=1
+        print_status "OSRM reachable at $OSRM_EFF_URL (snapping enforced)"
+    else
+        ENFORCE_SNAP=0
+        print_warning "OSRM not reachable; vehicles may not follow roads."
+    fi
+
     # Clear telemetry data to prevent old data from affecting metrics
     print_status "6. Clearing telemetry data..."
     TELE_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/telemetry || echo 000)
@@ -1142,6 +1164,9 @@ populate_database() {
         BASE_LON=$(echo "$CITY_COORDS" | cut -d':' -f2)
         V_LAT=$(echo "$BASE_LAT" | awk '{printf "%.6f", $1}')
         V_LON=$(echo "$BASE_LON" | awk '{printf "%.6f", $1}')
+        if [ "$ENFORCE_SNAP" = "1" ]; then
+            read V_LAT V_LON <<< "$(osrm_snap "$V_LAT" "$V_LON")"
+        fi
         VEHICLE_BODY=$(cat <<JSON
 {"type":"EV","make":"Tesla","model":"Model 3","year":2023,"status":"active","current_location":{"lat":$V_LAT,"lon":$V_LON}}
 JSON
@@ -1199,8 +1224,8 @@ JSON
                 if (( $(echo "$V_LAT > -60 && $V_LAT < 80" | bc -l) )) && (( $(echo "$V_LON > -180 && $V_LON < 180" | bc -l) )); then
                     # Additional check: avoid coordinates that look like they're in the middle of oceans
                     # This is a simplified check - real implementation would use a land/sea database
-                    LAT_ABS=$(echo "scale=6; if($V_LAT < 0) -$V_LAT else $V_LAT" | bc -l)
-                    LON_ABS=$(echo "scale=6; if($V_LON < 0) -$V_LON else $V_LON" | bc -l)
+                    LAT_ABS=$(echo "scale=6; x=$V_LAT; if (x < 0) x = -x; x" | bc -l)
+                    LON_ABS=$(echo "scale=6; x=$V_LON; if (x < 0) x = -x; x" | bc -l)
                     if (( $(echo "$LAT_ABS > 0.1 && $LON_ABS > 0.1" | bc -l) )); then
                         break  # Valid land coordinates found
                     fi
@@ -1212,6 +1237,9 @@ JSON
             if [ $ATTEMPTS -eq $MAX_ATTEMPTS ]; then
                 V_LAT="$BASE_LAT"
                 V_LON="$BASE_LON"
+            fi
+            if [ "$ENFORCE_SNAP" = "1" ]; then
+                read V_LAT V_LON <<< "$(osrm_snap "$V_LAT" "$V_LON")"
             fi
             VEHICLE_BODY=$(python3 - <<PY
 import json
@@ -1625,31 +1653,39 @@ PY
     echo ""
     
     # If city-based option was used, restart simulator to pick up new cities
-    if [ "$psel" = "2" ] && [ -n "${SIM_EXTRA_CITIES:-}" ]; then
+    if [ -n "${SIM_EXTRA_CITIES:-}" ] || [ "$psel" = "0" ] || [ "$psel" = "1" ] || [ "$psel" = "3" ]; then
         echo ""
-        print_status "City-based option detected - restarting simulator with selected cities..."
+        print_status "Starting simulator to animate vehicles..."
         
         # Stop existing simulator
         stop_simulator >/dev/null 2>&1 || true
         sleep 2
         
-        # For global cities (like India), use public OSRM for better road coverage
-        # Local OSRM only has Monaco data, which doesn't cover India well
-        print_status "Using public OSRM for global road coverage (includes India)..."
-        export OSRM_BASE_URL="https://router.project-osrm.org"
+        # Prefer public OSRM for global coverage unless already using a local OSRM
+        if [ -z "${OSRM_BASE_URL:-}" ] || echo "$OSRM_BASE_URL" | grep -vq "^http://localhost:5000$"; then
+            print_status "Using public OSRM for global road coverage"
+            export OSRM_BASE_URL="https://router.project-osrm.org"
+        fi
         
         # Use existing vehicles from populate instead of creating new ones
         export SIM_USE_EXISTING=1
-        export FLEET_SIZE=8  # Match the number of vehicles created by populate
+        # Match fleet size to created vehicles when known; fallback to 8
+        if [ -n "${#VEHICLE_IDS[@]}" ] && [ ${#VEHICLE_IDS[@]} -gt 0 ]; then
+            export FLEET_SIZE=${#VEHICLE_IDS[@]}
+        else
+            export FLEET_SIZE=8
+        fi
         
         # Start simulator with the selected cities
         print_status "Starting simulator with cities: ${CITIES[*]}"
         print_status "Environment: SIM_USE_EXISTING=$SIM_USE_EXISTING, FLEET_SIZE=$FLEET_SIZE, SIM_EXTRA_CITIES=$SIM_EXTRA_CITIES"
+        # Ensure simulator uses all created vehicles and snaps to road
+        export SIM_SNAP_TO_ROAD=1
+        export SIM_TICK_SECONDS=${SIM_TICK_SECONDS:-1}
         start_simulator local
         
         echo ""
-        print_status "✅ Simulator restarted with selected cities!"
-        print_status "Vehicles should now spawn in and move between your selected cities."
+        print_status "✅ Simulator started! Vehicles should move and stay on roads."
     fi
 }
 
