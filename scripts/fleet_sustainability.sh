@@ -606,6 +606,25 @@ stop_fleet_sustainability() {
     echo ""
 }
 
+# Start only backend core services (no frontend, no local OSRM) for auto-fix/minimal flows
+ensure_core_services_up() {
+    local need=0
+    # Check core containers individually to avoid starting the whole stack
+    if ! docker ps --format '{{.Names}}' | grep -q '^fleet-sustainability-app$'; then need=1; fi
+    if ! docker ps --format '{{.Names}}' | grep -q '^fleet-sustainability-mongo$'; then need=1; fi
+    if ! docker ps --format '{{.Names}}' | grep -q '^fleet-sustainability-mongo-express$'; then need=1; fi
+    if ! docker ps --format '{{.Names}}' | grep -q '^fleet-sustainability-mosquitto$'; then need=1; fi
+    if [ "$need" -eq 1 ]; then
+        print_status "Starting core backend services (no frontend, no local OSRM)..."
+        (cd "$REPO_ROOT" && docker-compose up -d app mongo mosquitto mongo-express) || {
+            print_error "Failed to start core services"; return 1; }
+        sleep 3
+    else
+        print_status "Core backend services already running"
+    fi
+    return 0
+}
+
 # Function to show status
 show_status() {
     print_header
@@ -2157,37 +2176,23 @@ auto_fix() {
     print_header
     print_status "Running Auto-fix: stop sim, clear DB, seed, start movement..."
 
-    # 0) Ensure core services (backend, DB, MQTT) and frontend are up
+    # 0) Ensure core services (backend, DB, MQTT) are up (skip frontend)
     if ! docker info >/dev/null 2>&1; then
         print_error "Docker is not running. Please start Docker Desktop and re-run auto-fix."
         return 1
     fi
 
-    NEED_STACK_START=0
-    if ! docker ps | grep -q "fleet-sustainability-app"; then
-        NEED_STACK_START=1
+    if [ "${AUTO_FIX_REBUILD:-0}" -eq 1 ]; then
+        print_status "Building backend image (this may take a few minutes)..."
+        (cd "$REPO_ROOT" && docker-compose build app) || print_warning "Backend image build failed; continuing with existing image"
     fi
-    if ! lsof -i :3000 >/dev/null 2>&1; then
-        NEED_STACK_START=1
-    fi
-    if [ "$NEED_STACK_START" -eq 1 ]; then
-        print_status "Starting full stack (backend, DB, MQTT, OSRM, frontend)..."
-        # Optional rebuild (set AUTO_FIX_REBUILD=1 to force). Shows progress if enabled.
-        if [ "${AUTO_FIX_REBUILD:-0}" -eq 1 ]; then
-            print_status "Building backend image (this may take a few minutes)..."
-            ROOT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")/.."
-            (cd "$ROOT_DIR" && docker-compose build app) || print_warning "Backend image build failed; continuing with existing image"
-        fi
-        start_fleet_sustainability || {
-            print_error "Failed to start core services."
-            return 1
-        }
-        # Give services a brief moment
-        sleep 3
-    fi
+    ensure_core_services_up || { print_error "Failed to start core services."; return 1; }
 
-    # 1) Stop simulator
-    stop_simulator >/dev/null 2>&1 || true
+    # 1) Stop simulator if running
+    if pgrep -f './simulator\|go run ./cmd/simulator' >/dev/null 2>&1; then
+        stop_simulator >/dev/null 2>&1 || true
+        sleep 1
+    fi
 
     # 2) Clear DB (preserves users)
     clear_database || { print_error "Auto-fix aborted: failed to clear DB"; return 1; }
@@ -2709,8 +2714,10 @@ PY
 
     # 5) Restart simulator to use all vehicles with global OSRM for proper road snapping
     print_status "Restarting simulator to activate all vehicles with global road coverage..."
-    stop_simulator >/dev/null 2>&1 || true
-    sleep 2
+    if pgrep -f './simulator\|go run ./cmd/simulator' >/dev/null 2>&1; then
+        stop_simulator >/dev/null 2>&1 || true
+        sleep 1
+    fi
     
     # Use global OSRM for worldwide road coverage and proper snapping
     export OSRM_BASE_URL="https://router.project-osrm.org"
