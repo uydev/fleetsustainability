@@ -194,42 +194,8 @@ const WorldMap = forwardRef<WorldMapRef, WorldMapProps>(({ telemetry, onNavigate
 
   // chargingStationIcon removed (unused)
 
-  // Sample vehicle data if no telemetry provided
-  const sampleVehicles: Telemetry[] = [
-    {
-      vehicle_id: 'sample-ev-1',
-      location: { lat: 51.5, lon: -0.09 }, // London
-      type: 'EV',
-      speed: 45,
-      battery_level: 85,
-      emissions: 0,
-      status: 'active',
-      timestamp: new Date().toISOString(),
-    },
-    {
-      vehicle_id: 'sample-ice-1',
-      location: { lat: 40.7128, lon: -74.0060 }, // New York
-      type: 'ICE',
-      speed: 32,
-      fuel_level: 65,
-      emissions: 120,
-      status: 'active',
-      timestamp: new Date().toISOString(),
-    },
-    {
-      vehicle_id: 'sample-ev-2',
-      location: { lat: 35.6762, lon: 139.6503 }, // Tokyo
-      type: 'EV',
-      speed: 28,
-      battery_level: 92,
-      emissions: 0,
-      status: 'active',
-      timestamp: new Date().toISOString(),
-    },
-  ];
-
-  // Use provided telemetry or sample data
-  const vehicles: Telemetry[] = telemetry && telemetry.length > 0 ? telemetry : sampleVehicles;
+  // Use provided telemetry only (no sample markers when empty)
+  const vehicles: Telemetry[] = Array.isArray(telemetry) ? telemetry : [];
 
   // Filter vehicles with valid location data
   const validVehicles = vehicles.filter((vehicle: Telemetry) => 

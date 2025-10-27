@@ -748,6 +748,10 @@ clear_database() {
     print_status "Clearing database data (preserving users)..."
     echo ""
 
+    # Ensure simulator is not running to avoid repopulating data while clearing
+    print_status "0. Stopping simulator to prevent new telemetry during cleanup..."
+    stop_simulator >/dev/null 2>&1 || true
+
     # Detect if stack is already running; avoid unnecessary restart
     if docker ps --format '{{.Names}}' | grep -q '^fleet-sustainability-app$'; then
         print_status "1. Using running containers (no restart)."
@@ -1046,6 +1050,33 @@ populate_database() {
     fi
     
     print_status "   Authentication successful"
+
+    # Ensure routing is available for snapping-to-road in ALL populate modes
+    print_status "3. Checking routing (OSRM) for snapping..."
+    OSRM_EFF_URL=${OSRM_BASE_URL:-https://router.project-osrm.org}
+    CODE=$(curl -s -o /dev/null -w '%{http_code}' "$OSRM_EFF_URL/route/v1/driving/0,0;0.1,0.1?overview=false" || echo 000)
+    if [ "$CODE" != "200" ]; then
+        print_warning "Public OSRM not reachable (HTTP $CODE); attempting local OSRM..."
+        start_local_osrm || true
+        OSRM_EFF_URL="http://localhost:5000"
+        for i in {1..20}; do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "$OSRM_EFF_URL/route/v1/driving/7.41,43.73;7.42,43.74?overview=false" || echo 000)
+            [ "$CODE" = "200" ] && break
+            sleep 1
+        done
+    fi
+    if [ "$CODE" = "200" ]; then
+        export OSRM_BASE_URL="$OSRM_EFF_URL"
+        export OSRM_EFF_URL="$OSRM_EFF_URL"
+        export ENFORCE_SNAP=1
+        print_status "OSRM reachable at $OSRM_EFF_URL (snapping enabled)"
+    else
+        ENFORCE_SNAP=0
+        print_warning "OSRM not reachable; seeding may not perfectly follow roads."
+    fi
+
+    # Always enforce movement in generated series
+    export NO_STATIONARY=1
 
     # Sanity check API reachability
     API_CODE=$(curl -s -o /dev/null -w '%{http_code}' -m 5 -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/vehicles)
@@ -1701,6 +1732,12 @@ PY
             print_status "Using public OSRM for global road coverage"
             export OSRM_BASE_URL="https://router.project-osrm.org"
         fi
+        # Enforce strict on-road behavior for simulator
+        export SIM_SNAP_TO_ROAD=1
+        export SIM_SNAP_STRICT=1
+        export SIM_SNAP_RATE=1
+        export SIM_ONLY_CITIES=1
+        export SIM_RELOCATE_TO_CITIES=1
         
         # Use existing vehicles from populate instead of creating new ones
         export SIM_USE_EXISTING=1
