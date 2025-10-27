@@ -31,6 +31,21 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Ensure ECR repository exists
+        env:
+          REPO: ${{ env.ECR_REPOSITORY }}
+        run: |
+          set -e
+          if ! aws ecr describe-repositories --repository-names "$REPO" >/dev/null 2>&1; then
+            echo "Creating ECR repository: $REPO"
+            aws ecr create-repository \
+              --repository-name "$REPO" \
+              --image-scanning-configuration scanOnPush=true \
+              --encryption-configuration encryptionType=AES256 >/dev/null
+          else
+            echo "ECR repository exists: $REPO"
+          fi
+
       - name: Build, tag, and push image
         env:
           IMAGE_URI: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}
