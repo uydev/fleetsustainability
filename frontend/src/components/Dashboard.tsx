@@ -9,8 +9,6 @@ import {
   Tab,
   AppBar,
   Toolbar,
-  Button,
-  Avatar,
   Menu,
   MenuItem,
   IconButton,
@@ -135,7 +133,11 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     // Refresh alerts whenever time range changes
     const tr = currentTimeRange;
-    apiService.getAlerts(tr && (tr.from || tr.to) ? tr : undefined).then(setAlerts).catch(() => setAlerts([]));
+    apiService
+      .getAlerts(tr && (tr.from || tr.to) ? tr : undefined)
+      .then(setAlerts)
+      .catch(() => setAlerts([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTimeRange.from, currentTimeRange.to]);
 
   // Build a telemetry array aligned 1:1 with registered vehicles
@@ -212,8 +214,7 @@ const Dashboard: React.FC = () => {
     );
   }
 
-  const evCount = telemetry?.filter(t => t.battery_level !== undefined && t.battery_level !== null).length || 0;
-  const iceCount = telemetry?.filter(t => t.fuel_level !== undefined && t.fuel_level !== null).length || 0;
+  // counts are currently unused
 
   return (
     <>

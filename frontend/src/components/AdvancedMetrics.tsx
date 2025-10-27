@@ -10,11 +10,7 @@ const fmt1 = (n: number | undefined) => {
   return (Math.round(v * 10) / 10).toFixed(1);
 };
 
-const fmt0 = (n: number | undefined) => {
-  const v = Number(n);
-  if (!isFinite(v)) return '0';
-  return String(Math.round(v));
-};
+// (fmt0 removed – unused)
 
 const AdvancedMetrics: React.FC<Props> = ({ timeRange }) => {
   const [data, setData] = useState<any>({});
@@ -26,7 +22,7 @@ const AdvancedMetrics: React.FC<Props> = ({ timeRange }) => {
       .then(setData)
       .catch(() => setData({}))
       .finally(() => setLoading(false));
-  }, [timeRange?.from]);
+  }, [timeRange?.from, timeRange?.to]);
 
   return (
     <Paper sx={{ p:2 }}>

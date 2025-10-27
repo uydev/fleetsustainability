@@ -16,7 +16,7 @@ interface LiveViewProps {
 }
 
 const LiveView: React.FC<LiveViewProps> = ({ onNavigateToVehicleDetail }) => {
-  const [telemetryList, setTelemetryList] = useState<Telemetry[]>([]);
+  const [, setTelemetryList] = useState<Telemetry[]>([]);
   const [vehicles, setVehicles] = useState<VehicleMeta[]>([]);
   const storeRef = useRef<TelemetryById>(new Map());
   const eventSourceRef = useRef<EventSource | null>(null);

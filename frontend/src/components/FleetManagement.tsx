@@ -58,7 +58,8 @@ const FleetManagement: React.FC<FleetManagementProps> = ({ timeRange }) => {
 
   useEffect(() => {
     loadVehicles();
-  }, [timeRange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeRange?.from, timeRange?.to]);
 
   const handleAddVehicle = async (vehicle: Omit<Vehicle, 'id'>) => {
     try {

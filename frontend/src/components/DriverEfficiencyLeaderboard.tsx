@@ -30,11 +30,6 @@ import {
   TrendingDown,
   LocalGasStation,
   Park,
-  Speed,
-  Timer,
-  Person,
-  Star,
-  StarBorder,
 } from '@mui/icons-material';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import apiService from '../services/api';

@@ -57,7 +57,8 @@ const CostManagement: React.FC<CostManagementProps> = ({ timeRange }) => {
 
   useEffect(() => {
     loadCosts();
-  }, [timeRange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeRange?.from, timeRange?.to]);
 
   const handleAddCost = async (costData: Omit<Cost, 'id'>) => {
     try {

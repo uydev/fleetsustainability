@@ -30,7 +30,6 @@ import {
 } from '@mui/material';
 import {
   TrendingUp,
-  TrendingDown,
   ElectricCar,
   LocalGasStation,
   AttachMoney,
@@ -362,14 +361,7 @@ const ElectrificationPlanning: React.FC<Props> = ({ vehicles, timeRange }) => {
     return data;
   }, [recommendations]);
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'High': return '#f44336';
-      case 'Medium': return '#ff9800';
-      case 'Low': return '#4caf50';
-      default: return '#9e9e9e';
-    }
-  };
+  // getPriorityColor was unused – removed to satisfy linter
 
   const formatCurrency = (amount: number) => `€${amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
   const formatNumber = (num: number, decimals = 1) => num.toLocaleString(undefined, { maximumFractionDigits: decimals });
