@@ -606,6 +606,25 @@ stop_fleet_sustainability() {
     echo ""
 }
 
+# Start only backend core services (no frontend, no local OSRM) for auto-fix/minimal flows
+ensure_core_services_up() {
+    local need=0
+    # Check core containers individually to avoid starting the whole stack
+    if ! docker ps --format '{{.Names}}' | grep -q '^fleet-sustainability-app$'; then need=1; fi
+    if ! docker ps --format '{{.Names}}' | grep -q '^fleet-sustainability-mongo$'; then need=1; fi
+    if ! docker ps --format '{{.Names}}' | grep -q '^fleet-sustainability-mongo-express$'; then need=1; fi
+    if ! docker ps --format '{{.Names}}' | grep -q '^fleet-sustainability-mosquitto$'; then need=1; fi
+    if [ "$need" -eq 1 ]; then
+        print_status "Starting core backend services (no frontend, no local OSRM)..."
+        (cd "$REPO_ROOT" && docker-compose up -d app mongo mosquitto mongo-express) || {
+            print_error "Failed to start core services"; return 1; }
+        sleep 3
+    else
+        print_status "Core backend services already running"
+    fi
+    return 0
+}
+
 # Function to show status
 show_status() {
     print_header
@@ -729,15 +748,25 @@ clear_database() {
     print_status "Clearing database data (preserving users)..."
     echo ""
 
-    # Stop containers to ensure clean state
-    print_status "1. Stopping containers..."
-    docker-compose down > /dev/null 2>&1
-    print_status "   Containers stopped"
+    # Ensure simulator is not running to avoid repopulating data while clearing
+    print_status "0. Stopping simulator to prevent new telemetry during cleanup..."
+    stop_simulator >/dev/null 2>&1 || true
 
-    # Start containers fresh
-    print_status "2. Starting containers..."
-    docker-compose up -d > /dev/null 2>&1
-    print_status "   Containers started"
+    # Detect if stack is already running; avoid unnecessary restart
+    if docker ps --format '{{.Names}}' | grep -q '^fleet-sustainability-app$'; then
+        print_status "1. Using running containers (no restart)."
+        print_status "2. Skipping container restart"
+    else
+        # Stop containers to ensure clean state
+        print_status "1. Stopping containers..."
+        docker-compose down > /dev/null 2>&1 || true
+        print_status "   Containers stopped"
+
+        # Start containers fresh
+        print_status "2. Starting containers..."
+        docker-compose up -d > /dev/null 2>&1 || true
+        print_status "   Containers started"
+    fi
 
     # Wait for backend to be ready
     print_status "3. Waiting for backend to be ready..."
@@ -1022,6 +1051,33 @@ populate_database() {
     
     print_status "   Authentication successful"
 
+    # Ensure routing is available for snapping-to-road in ALL populate modes
+    print_status "3. Checking routing (OSRM) for snapping..."
+    OSRM_EFF_URL=${OSRM_BASE_URL:-https://router.project-osrm.org}
+    CODE=$(curl -s -o /dev/null -w '%{http_code}' "$OSRM_EFF_URL/route/v1/driving/0,0;0.1,0.1?overview=false" || echo 000)
+    if [ "$CODE" != "200" ]; then
+        print_warning "Public OSRM not reachable (HTTP $CODE); attempting local OSRM..."
+        start_local_osrm || true
+        OSRM_EFF_URL="http://localhost:5000"
+        for i in {1..20}; do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "$OSRM_EFF_URL/route/v1/driving/7.41,43.73;7.42,43.74?overview=false" || echo 000)
+            [ "$CODE" = "200" ] && break
+            sleep 1
+        done
+    fi
+    if [ "$CODE" = "200" ]; then
+        export OSRM_BASE_URL="$OSRM_EFF_URL"
+        export OSRM_EFF_URL="$OSRM_EFF_URL"
+        export ENFORCE_SNAP=1
+        print_status "OSRM reachable at $OSRM_EFF_URL (snapping enabled)"
+    else
+        ENFORCE_SNAP=0
+        print_warning "OSRM not reachable; seeding may not perfectly follow roads."
+    fi
+
+    # Always enforce movement in generated series
+    export NO_STATIONARY=1
+
     # Sanity check API reachability
     API_CODE=$(curl -s -o /dev/null -w '%{http_code}' -m 5 -H "Authorization: Bearer $TOKEN" http://localhost:8081/api/vehicles)
     if [ "$API_CODE" != "200" ]; then
@@ -1125,9 +1181,14 @@ populate_database() {
         
         print_status "Selected cities for simulator: ${CITIES[*]}"
         print_status "SIM_EXTRA_CITIES will be set to: $SIM_EXTRA_CITIES"
-        
-        # Export the variable so it's available when simulator starts
+
+        # Export the variables so they're available when simulator starts
         export SIM_EXTRA_CITIES
+        # Constrain simulator to only these cities and snap to road for realism
+        export SIM_ONLY_CITIES=1
+        export SIM_SNAP_TO_ROAD=1
+        # Disable dwelling to avoid stationary vehicles during demo runs
+        export SIM_NO_DWELL=1
         
         choose_window
     else
@@ -1423,7 +1484,12 @@ PY
                     fi
                 else
                     # Motion: 3 steps moving, 1 step idle (approximate with stride)
-                    if [ $(((ts-START_EPOCH)/STEP_SECONDS % 4)) -lt 3 ]; then
+                    if [ "${NO_STATIONARY:-0}" = "1" ]; then
+                        # Always moving: choose a realistic cruising speed band
+                        TARGET=$((RANDOM % 40 + 20))
+                        if [ $SPEED -lt $TARGET ]; then SPEED=$((SPEED+5)); else SPEED=$((SPEED-3)); fi
+                        if [ $SPEED -lt 10 ]; then SPEED=10; fi
+                    elif [ $(((ts-START_EPOCH)/STEP_SECONDS % 4)) -lt 3 ]; then
                         TARGET=$((RANDOM % 60 + 10))
                         if [ $SPEED -lt $TARGET ]; then SPEED=$((SPEED+5)); else SPEED=$((SPEED-3)); fi
                         if [ $SPEED -lt 0 ]; then SPEED=0; fi
@@ -1666,6 +1732,12 @@ PY
             print_status "Using public OSRM for global road coverage"
             export OSRM_BASE_URL="https://router.project-osrm.org"
         fi
+        # Enforce strict on-road behavior for simulator
+        export SIM_SNAP_TO_ROAD=1
+        export SIM_SNAP_STRICT=1
+        export SIM_SNAP_RATE=1
+        export SIM_ONLY_CITIES=1
+        export SIM_RELOCATE_TO_CITIES=1
         
         # Use existing vehicles from populate instead of creating new ones
         export SIM_USE_EXISTING=1
@@ -1962,55 +2034,8 @@ start_simulator() {
         else
             print_warning "No simulator.out file found"
         fi
-        
-        # Try auto-fix as a last resort
-        print_status "Attempting auto-fix to resolve issues..."
-        auto_fix >/dev/null 2>&1 || true
-        
-        # Try starting simulator again after auto-fix
-        print_status "Retrying simulator start after auto-fix..."
-        sleep 2
-        
-        # Re-run the simulator start process
-        if [ -n "$OSRM_URL" ]; then
-            {
-                env \
-                    SIM_AUTH_TOKEN="$TOKEN" \
-                    API_BASE_URL="http://localhost:8081/api" \
-                    SIM_TICK_SECONDS="$SIM_TICK_SECONDS" \
-                    FLEET_SIZE="$FLEET_SIZE" \
-                    SIM_SNAP_TO_ROAD="$SIM_SNAP_TO_ROAD" \
-                    SIM_GLOBAL="$SIM_GLOBAL" \
-                    SIM_USE_EXISTING="${SIM_USE_EXISTING:-0}" \
-                    SIM_EXTRA_CITIES="${SIM_EXTRA_CITIES:-}" \
-                    OSRM_BASE_URL="$OSRM_URL" \
-                    $SIM_RUN_CMD
-            } > simulator.out 2>&1 &
-        else
-            {
-                env \
-                    SIM_AUTH_TOKEN="$TOKEN" \
-                    API_BASE_URL="http://localhost:8081/api" \
-                    SIM_TICK_SECONDS="$SIM_TICK_SECONDS" \
-                    FLEET_SIZE="$FLEET_SIZE" \
-                    SIM_SNAP_TO_ROAD="$SIM_SNAP_TO_ROAD" \
-                    SIM_GLOBAL="$SIM_GLOBAL" \
-                    SIM_USE_EXISTING="${SIM_USE_EXISTING:-0}" \
-                    SIM_EXTRA_CITIES="${SIM_EXTRA_CITIES:-}" \
-                    $SIM_RUN_CMD
-            } > simulator.out 2>&1 &
-        fi
-        
-        SIM_PID=$!
-        sleep 1
-        
-        # Check if retry worked
-        if kill -0 "$SIM_PID" >/dev/null 2>&1; then
-            print_status "Simulator started successfully on retry (PID: $SIM_PID)"
-        else
-            print_error "Simulator still failed to start after auto-fix"
-            return 1
-        fi
+        # Do not call auto-fix here to avoid duplicate runs; return error instead
+        return 1
     fi
     
     # Write PID file with robust error handling
@@ -2188,14 +2213,35 @@ auto_fix() {
     print_header
     print_status "Running Auto-fix: stop sim, clear DB, seed, start movement..."
 
-    # 1) Stop simulator
-    stop_simulator >/dev/null 2>&1 || true
+    # 0) Ensure core services (backend, DB, MQTT) are up (skip frontend)
+    if ! docker info >/dev/null 2>&1; then
+        print_error "Docker is not running. Please start Docker Desktop and re-run auto-fix."
+        return 1
+    fi
+
+    if [ "${AUTO_FIX_REBUILD:-0}" -eq 1 ]; then
+        print_status "Building backend image (this may take a few minutes)..."
+        (cd "$REPO_ROOT" && docker-compose build app) || print_warning "Backend image build failed; continuing with existing image"
+    fi
+    ensure_core_services_up || { print_error "Failed to start core services."; return 1; }
+
+    # 1) Stop simulator if running
+    if pgrep -f './simulator\|go run ./cmd/simulator' >/dev/null 2>&1; then
+        stop_simulator >/dev/null 2>&1 || true
+        sleep 1
+    fi
 
     # 2) Clear DB (preserves users)
     clear_database || { print_error "Auto-fix aborted: failed to clear DB"; return 1; }
 
     # 3) Ensure backend and admin token
     print_status "Ensuring backend and admin token..."
+    # Wait for backend API to be reachable if starting fresh
+    for i in {1..60}; do
+        API_CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8081/health || echo 000)
+        [ "$API_CODE" = "200" ] && break
+        sleep 1
+    done
     ensure_admin_user || { print_error "Auto-fix aborted: backend/admin not ready"; return 1; }
     LOGIN_RESPONSE=$(curl -s -X POST http://localhost:8081/api/auth/login \
         -H "Content-Type: application/json" \
@@ -2705,8 +2751,10 @@ PY
 
     # 5) Restart simulator to use all vehicles with global OSRM for proper road snapping
     print_status "Restarting simulator to activate all vehicles with global road coverage..."
-    stop_simulator >/dev/null 2>&1 || true
-    sleep 2
+    if pgrep -f './simulator\|go run ./cmd/simulator' >/dev/null 2>&1; then
+        stop_simulator >/dev/null 2>&1 || true
+        sleep 1
+    fi
     
     # Use global OSRM for worldwide road coverage and proper snapping
     export OSRM_BASE_URL="https://router.project-osrm.org"

@@ -1,18 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  Button,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Box,
-  Alert,
-} from '@mui/material';
+import { Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button, FormControl, InputLabel, Select, MenuItem, Box } from '@mui/material';
 import { Vehicle } from '../types';
 
 interface VehicleFormProps {

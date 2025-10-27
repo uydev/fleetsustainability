@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import WorldMap from './WorldMap';
 import { Telemetry } from '../types';
 import { Box, Typography, Paper } from '@mui/material';
@@ -16,18 +16,17 @@ interface LiveViewProps {
 }
 
 const LiveView: React.FC<LiveViewProps> = ({ onNavigateToVehicleDetail }) => {
-  const [telemetryList, setTelemetryList] = useState<Telemetry[]>([]);
+  const [, setTelemetryList] = useState<Telemetry[]>([]);
   const [vehicles, setVehicles] = useState<VehicleMeta[]>([]);
   const storeRef = useRef<TelemetryById>(new Map());
   const eventSourceRef = useRef<EventSource | null>(null);
   const pollerRef = useRef<NodeJS.Timer | null>(null);
 
   // Compose exactly one item per vehicle id from union(registered vehicles, SSE vehicles)
-  const currentTelemetry = useMemo(() => {
+  const currentTelemetry: Telemetry[] = (() => {
     const ids = new Set<string>();
     const out: Telemetry[] = [];
 
-    // Include all registered vehicles
     for (const v of vehicles) {
       ids.add(v.id);
       const t = storeRef.current.get(v.id);
@@ -46,7 +45,6 @@ const LiveView: React.FC<LiveViewProps> = ({ onNavigateToVehicleDetail }) => {
       }
     }
 
-    // Include any SSE-only vehicles not present in the vehicles list
     storeRef.current.forEach((t, id) => {
       if (!ids.has(id)) {
         ids.add(id);
@@ -55,7 +53,7 @@ const LiveView: React.FC<LiveViewProps> = ({ onNavigateToVehicleDetail }) => {
     });
 
     return out;
-  }, [telemetryList, vehicles]);
+  })();
 
   useEffect(() => {
     // Load registered vehicles once

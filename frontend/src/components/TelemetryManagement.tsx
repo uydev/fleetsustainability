@@ -1,24 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import {
-  Box,
-  Button,
-  Paper,
-  Typography,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  IconButton,
-  Chip,
-  Alert,
-  Snackbar,
-} from '@mui/material';
-import {
-  Add as AddIcon,
-  Delete as DeleteIcon,
-} from '@mui/icons-material';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Box, Button, Paper, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Alert, Snackbar } from '@mui/material';
+import { Add as AddIcon } from '@mui/icons-material';
 import TelemetryForm from './TelemetryForm';
 import apiService from '../services/api';
 import { Telemetry } from '../types';
@@ -37,7 +19,7 @@ const TelemetryManagement: React.FC<TelemetryManagementProps> = ({ timeRange }) 
     severity: 'success' | 'error';
   }>({ open: false, message: '', severity: 'success' });
 
-  const loadTelemetry = async () => {
+  const loadTelemetry = useCallback(async () => {
     setLoading(true);
     try {
       const data = await apiService.getTelemetry(timeRange);
@@ -52,11 +34,11 @@ const TelemetryManagement: React.FC<TelemetryManagementProps> = ({ timeRange }) 
     } finally {
       setLoading(false);
     }
-  };
+  }, [timeRange]);
 
   useEffect(() => {
     loadTelemetry();
-  }, [timeRange]);
+  }, [loadTelemetry]);
 
   const handleAddTelemetry = async (telemetryData: Omit<Telemetry, 'id'>) => {
     try {
