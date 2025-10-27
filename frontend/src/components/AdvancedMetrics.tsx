@@ -22,7 +22,7 @@ const AdvancedMetrics: React.FC<Props> = ({ timeRange }) => {
       .then(setData)
       .catch(() => setData({}))
       .finally(() => setLoading(false));
-  }, [timeRange?.from, timeRange?.to]);
+  }, [timeRange]);
 
   return (
     <Paper sx={{ p:2 }}>

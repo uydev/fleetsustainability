@@ -133,20 +133,7 @@ const ElectrificationPlanning: React.FC<Props> = ({ vehicles, timeRange }) => {
     return (usedPct / 100) * TANK_CAPACITY_L;
   };
 
-  const computeEnergyUsedKwhFromBattery = (rows: Telemetry[]): number => {
-    let usedPct = 0;
-    for (let i = 1; i < rows.length; i++) {
-      const prev = rows[i - 1];
-      const curr = rows[i];
-      const p = prev.battery_level ?? null;
-      const c = curr.battery_level ?? null;
-      if (p !== null && c !== null) {
-        const drop = p - c;
-        if (drop > 0) usedPct += drop;
-      }
-    }
-    return (usedPct / 100) * BATTERY_CAPACITY_KWH;
-  };
+  // computeEnergyUsedKwhFromBattery was unused – remove to satisfy linter
 
   // Fetch telemetry data
   useEffect(() => {
@@ -315,7 +302,7 @@ const ElectrificationPlanning: React.FC<Props> = ({ vehicles, timeRange }) => {
         reasons
       };
     }).sort((a, b) => b.score - a.score);
-  }, [vehicles, telemetry]);
+  }, [vehicles, telemetry, computeDaysCovered, computeDistanceKm]);
 
   // Calculate summary statistics
   const summary = useMemo((): ElectrificationSummary => {
