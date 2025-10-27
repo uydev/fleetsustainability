@@ -3,6 +3,7 @@ name: Build and push backend to ECR
 on:
   push:
     branches: [ main ]
+  workflow_dispatch: {}
 
 env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
