@@ -82,7 +82,7 @@ const ElectrificationPlanning: React.FC<Props> = ({ vehicles, timeRange }) => {
   const EV_PRICE = 35000; // €
   const ELECTRICITY_PRICE_PER_KWH = 0.25; // €
   const TANK_CAPACITY_L = 50; // liters
-  const BATTERY_CAPACITY_KWH = 60; // kWh
+  // const BATTERY_CAPACITY_KWH = 60; // kWh (unused)
   const EV_EFFICIENCY_KWH_PER_KM = 0.18; // kWh per km (typical compact EV)
   const MAINT_ICE_PER_KM = 0.08; // € per km
   const MAINT_EV_PER_KM = 0.05; // € per km
@@ -101,7 +101,7 @@ const ElectrificationPlanning: React.FC<Props> = ({ vehicles, timeRange }) => {
     return 2 * R * Math.asin(Math.sqrt(h));
   };
 
-  const computeDistanceKm = (rows: Telemetry[]): number => {
+  const computeDistanceKm = React.useCallback((rows: Telemetry[]): number => {
     let dist = 0;
     for (let i = 1; i < rows.length; i++) {
       const prev = rows[i - 1];
@@ -109,13 +109,13 @@ const ElectrificationPlanning: React.FC<Props> = ({ vehicles, timeRange }) => {
       dist += kmBetween(prev.location, curr.location);
     }
     return dist;
-  };
+  }, []);
 
-  const computeDaysCovered = (rows: Telemetry[]): number => {
+  const computeDaysCovered = React.useCallback((rows: Telemetry[]): number => {
     if (rows.length < 2) return 1;
     const days = (toMs(rows[rows.length - 1].timestamp) - toMs(rows[0].timestamp)) / (1000 * 60 * 60 * 24);
     return Math.max(1, days);
-  };
+  }, []);
 
   const computeFuelUsedLiters = (rows: Telemetry[]): number => {
     // Sum only decreases in fuel_level to approximate consumption
@@ -181,7 +181,8 @@ const ElectrificationPlanning: React.FC<Props> = ({ vehicles, timeRange }) => {
       // Calculate metrics from telemetry
       const daysOfData = computeDaysCovered(vehicleTelemetry);
       const distanceKm = computeDistanceKm(vehicleTelemetry);
-      const avgSpeed = vehicleTelemetry.reduce((sum, t) => sum + t.speed, 0) / vehicleTelemetry.length;
+      // avg speed not used in final output; keep for potential future but avoid unused var lint
+      /* const avgSpeed = vehicleTelemetry.reduce((sum, t) => sum + t.speed, 0) / vehicleTelemetry.length; */
       const totalEmissions = vehicleTelemetry.reduce((sum, t) => sum + t.emissions, 0);
       const emissionsPerKm = distanceKm > 0 ? totalEmissions / distanceKm : totalEmissions;
 
