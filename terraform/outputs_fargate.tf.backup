@@ -1,0 +1,25 @@
+output "load_balancer_dns" {
+  value       = aws_lb.fleet_alb.dns_name
+  description = "DNS name of the load balancer (use this as your API URL)"
+}
+
+output "ecr_repository_url" {
+  value       = aws_ecr_repository.fleet_backend.repository_url
+  description = "ECR repository URL for Docker images"
+}
+
+output "current_account_id" {
+  value       = data.aws_caller_identity.current.account_id
+  description = "AWS Account ID that Terraform deployed to"
+}
+
+output "ecs_cluster_name" {
+  value       = aws_ecs_cluster.fleet_cluster.name
+  description = "ECS Cluster name"
+}
+
+output "ecs_service_name" {
+  value       = aws_ecs_service.fleet_backend.name
+  description = "ECS Service name"
+}
+
