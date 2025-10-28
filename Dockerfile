@@ -15,7 +15,7 @@ RUN go mod download
 COPY . .
 
 # Build the Go binary (static build)
-RUN CGO_ENABLED=0 GOOS=linux go build -o fleet-backend ./cmd/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -mod=mod -o fleet-backend ./cmd/main.go
 
 # --- Final stage (minimal) ---
 FROM alpine:3.20

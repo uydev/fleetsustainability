@@ -1,0 +1,363 @@
+terraform {
+  required_version = ">= 1.0"
+  
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0"
+    }
+  }
+}
+
+provider "aws" {
+  profile = "hephaestus-fleet"
+  region  = "eu-west-2"
+  
+  default_tags {
+    tags = {
+      Project     = "Fleet-Sustainability"
+      ManagedBy   = "Terraform"
+      Environment = "Production"
+      Owner       = "Hephaestus-Systems"
+    }
+  }
+}
+
+# Safety check - verify we're using the right account
+data "aws_caller_identity" "current" {}
+
+# Verify account before creating resources
+resource "null_resource" "verify_account" {
+  provisioner "local-exec" {
+    command = <<-EOT
+      EXPECTED_ACCOUNT="901465080034"
+      ACTUAL_ACCOUNT="${data.aws_caller_identity.current.account_id}"
+      if [ "$EXPECTED_ACCOUNT" != "$ACTUAL_ACCOUNT" ]; then
+        echo "ERROR: Wrong AWS account! Expected $EXPECTED_ACCOUNT but got $ACTUAL_ACCOUNT"
+        exit 1
+      fi
+      echo "✓ Deploying to correct account: $ACTUAL_ACCOUNT"
+    EOT
+  }
+  
+  triggers = {
+    always_run = timestamp()
+  }
+}
+
+# VPC for ECS
+resource "aws_vpc" "fleet_vpc" {
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+  
+  tags = {
+    Name = "fleet-sustainability-vpc"
+  }
+  
+  depends_on = [null_resource.verify_account]
+}
+
+# Internet Gateway
+resource "aws_internet_gateway" "fleet_igw" {
+  vpc_id = aws_vpc.fleet_vpc.id
+  
+  tags = {
+    Name = "fleet-sustainability-igw"
+  }
+}
+
+# Subnets
+resource "aws_subnet" "fleet_public" {
+  count                   = 2
+  vpc_id                  = aws_vpc.fleet_vpc.id
+  cidr_block              = "10.0.${count.index + 1}.0/24"
+  availability_zone       = data.aws_availability_zones.available.names[count.index]
+  map_public_ip_on_launch = true
+  
+  tags = {
+    Name = "fleet-sustainability-public-${count.index + 1}"
+  }
+}
+
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+# Route Table
+resource "aws_route_table" "fleet_rt" {
+  vpc_id = aws_vpc.fleet_vpc.id
+  
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.fleet_igw.id
+  }
+  
+  tags = {
+    Name = "fleet-sustainability-rt"
+  }
+}
+
+resource "aws_route_table_association" "fleet_rta" {
+  count          = 2
+  subnet_id      = aws_subnet.fleet_public[count.index].id
+  route_table_id = aws_route_table.fleet_rt.id
+}
+
+# Security Group
+resource "aws_security_group" "fleet_sg" {
+  name        = "fleet-sustainability-sg"
+  description = "Security group for Fleet Sustainability Backend"
+  vpc_id      = aws_vpc.fleet_vpc.id
+  
+  ingress {
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Backend API"
+  }
+  
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow all outbound"
+  }
+  
+  tags = {
+    Name = "fleet-sustainability-sg"
+  }
+}
+
+# ECR Repository
+resource "aws_ecr_repository" "fleet_backend" {
+  name                 = "fleetsustainability-backend"
+  image_tag_mutability = "MUTABLE"
+  
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+  
+  tags = {
+    Name = "fleetsustainability-backend"
+  }
+}
+
+# ECR Lifecycle Policy - keep last 10 images
+resource "aws_ecr_lifecycle_policy" "fleet_backend_policy" {
+  repository = aws_ecr_repository.fleet_backend.name
+  
+  policy = jsonencode({
+    rules = [{
+      rulePriority = 1
+      description  = "Keep last 10 images"
+      selection = {
+        tagStatus     = "any"
+        countType     = "imageCountMoreThan"
+        countNumber   = 10
+      }
+      action = {
+        type = "expire"
+      }
+    }]
+  })
+}
+
+# ECS Cluster
+resource "aws_ecs_cluster" "fleet_cluster" {
+  name = "fleet-sustainability-cluster"
+  
+  tags = {
+    Name = "fleet-sustainability-cluster"
+  }
+}
+
+# CloudWatch Log Group
+resource "aws_cloudwatch_log_group" "fleet_logs" {
+  name              = "/ecs/fleet-sustainability"
+  retention_in_days = 7
+}
+
+# ECS Execution Role
+resource "aws_iam_role" "ecs_execution_role" {
+  name = "fleet-ecs-execution-role"
+  
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "ecs-tasks.amazonaws.com"
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_execution_role_policy" {
+  role       = aws_iam_role.ecs_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+# ECS Task Role
+resource "aws_iam_role" "ecs_task_role" {
+  name = "fleet-ecs-task-role"
+  
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "ecs-tasks.amazonaws.com"
+      }
+    }]
+  })
+}
+
+# ECS Task Definition
+resource "aws_ecs_task_definition" "fleet_backend" {
+  family                   = "fleet-sustainability-backend"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = "512"
+  memory                   = "1024"
+  execution_role_arn       = aws_iam_role.ecs_execution_role.arn
+  task_role_arn            = aws_iam_role.ecs_task_role.arn
+  
+  container_definitions = jsonencode([{
+    name  = "fleet-backend"
+    image = "${aws_ecr_repository.fleet_backend.repository_url}:latest"
+    
+    essential = true
+    
+    portMappings = [{
+      containerPort = 8080
+      protocol      = "tcp"
+    }]
+    
+    environment = [
+      {
+        name  = "MONGO_URI"
+        value = var.mongo_uri
+      },
+      {
+        name  = "MONGO_DB"
+        value = "fleet"
+      },
+      {
+        name  = "JWT_SECRET"
+        value = var.jwt_secret
+      },
+      {
+        name  = "TELEMETRY_TTL_DAYS"
+        value = "30"
+      },
+      {
+        name  = "WEBSOCKETS_ENABLED"
+        value = "1"
+      },
+      {
+        name  = "PORT"
+        value = "8080"
+      }
+    ]
+    
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = aws_cloudwatch_log_group.fleet_logs.name
+        "awslogs-region"        = "eu-west-2"
+        "awslogs-stream-prefix" = "ecs"
+      }
+    }
+    
+    healthCheck = {
+      command     = ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/api/health || exit 1"]
+      interval    = 30
+      timeout     = 5
+      retries     = 3
+      startPeriod = 60
+    }
+  }])
+}
+
+# Application Load Balancer
+resource "aws_lb" "fleet_alb" {
+  name               = "fleet-sustainability-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.fleet_sg.id]
+  subnets            = aws_subnet.fleet_public[*].id
+  
+  tags = {
+    Name = "fleet-sustainability-alb"
+  }
+}
+
+resource "aws_lb_target_group" "fleet_tg" {
+  name        = "fleet-sustainability-tg"
+  port        = 8080
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.fleet_vpc.id
+  target_type = "ip"
+  
+  health_check {
+    enabled             = true
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    timeout             = 5
+    interval            = 30
+    path                = "/api/health"
+    matcher             = "200"
+  }
+  
+  tags = {
+    Name = "fleet-sustainability-tg"
+  }
+}
+
+resource "aws_lb_listener" "fleet_listener" {
+  load_balancer_arn = aws_lb.fleet_alb.arn
+  port              = "80"
+  protocol          = "HTTP"
+  
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.fleet_tg.arn
+  }
+}
+
+# ECS Service
+resource "aws_ecs_service" "fleet_backend" {
+  name            = "fleet-sustainability-backend-service"
+  cluster         = aws_ecs_cluster.fleet_cluster.id
+  task_definition = aws_ecs_task_definition.fleet_backend.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+  
+  network_configuration {
+    subnets          = aws_subnet.fleet_public[*].id
+    security_groups  = [aws_security_group.fleet_sg.id]
+    assign_public_ip = true
+  }
+  
+  load_balancer {
+    target_group_arn = aws_lb_target_group.fleet_tg.arn
+    container_name   = "fleet-backend"
+    container_port   = 8080
+  }
+  
+  depends_on = [aws_lb_listener.fleet_listener]
+  
+  tags = {
+    Name = "fleet-sustainability-backend-service"
+  }
+}
+
