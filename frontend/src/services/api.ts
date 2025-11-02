@@ -1,7 +1,11 @@
 import axios, { AxiosInstance } from 'axios';
 import { Telemetry, FleetMetrics, Vehicle, Trip, Maintenance, Cost, TimeRange } from '../types';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8081';
+const API_BASE_URL =
+  process.env.REACT_APP_API_URL ||
+  (typeof window !== 'undefined' && window.location && window.location.hostname !== 'localhost'
+    ? window.location.origin
+    : 'http://localhost:8080');
 
 class ApiService {
   private api: AxiosInstance;

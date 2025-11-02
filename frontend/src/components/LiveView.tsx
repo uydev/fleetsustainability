@@ -4,7 +4,11 @@ import { Telemetry } from '../types';
 import { Box, Typography, Paper } from '@mui/material';
 import apiService from '../services/api';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8081';
+const API_BASE_URL =
+  process.env.REACT_APP_API_URL ||
+  (typeof window !== 'undefined' && window.location && window.location.hostname !== 'localhost'
+    ? window.location.origin
+    : 'http://localhost:8080');
 
 // Simple in-memory position store keyed by vehicle_id
 type TelemetryById = Map<string, Telemetry>;

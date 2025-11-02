@@ -628,10 +628,10 @@ func main() {
 		}
 	}
 
-	apiURL := os.Getenv("API_BASE_URL")
-	if apiURL == "" {
-		apiURL = "http://localhost:8081/api"
-	}
+    apiURL := os.Getenv("API_BASE_URL")
+    if apiURL == "" {
+        apiURL = "http://localhost:8080/api"
+    }
 
 	interval := 2 * time.Second
 	if v := os.Getenv("SIM_TICK_SECONDS"); v != "" {
@@ -652,7 +652,34 @@ func main() {
 		}
 	}
 
-	loadExtraCities()
+    loadExtraCities()
+
+    // Auto-login if no SIM_AUTH_TOKEN is provided and credentials are available
+    if authToken == "" {
+        u := os.Getenv("SIM_USERNAME")
+        p := os.Getenv("SIM_PASSWORD")
+        if u != "" && p != "" {
+            base := strings.TrimSuffix(apiURL, "/api")
+            payload := map[string]string{"username": u, "password": p}
+            body, _ := json.Marshal(payload)
+            req, err := http.NewRequest(http.MethodPost, base+"/api/auth/login", bytes.NewBuffer(body))
+            if err == nil {
+                req.Header.Set("Content-Type", "application/json")
+                client := &http.Client{Timeout: 10 * time.Second}
+                if resp, err := client.Do(req); err == nil {
+                    defer resp.Body.Close()
+                    if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+                        var res map[string]interface{}
+                        if err := json.NewDecoder(resp.Body).Decode(&res); err == nil {
+                            if tok, ok := res["token"].(string); ok && tok != "" {
+                                authToken = tok
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
 	log.WithFields(log.Fields{
 		"fleet_size": fleetSize,
