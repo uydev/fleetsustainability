@@ -54,19 +54,32 @@ detect_api_base() {
 }
 API_BASE_URL="$(detect_api_base)"
 
-# Rewrite any hard-coded localhost:8081 calls to the detected base
+"#" Rewrite any hard-coded localhost:8081 calls to the detected base (with or without trailing slash)
 __REAL_CURL_BIN__="$(command -v curl)"
 curl() {
     local args=() a
     for a in "$@"; do
         case "$a" in
-            http://localhost:8081/*)
+            http://localhost:8081|http://localhost:8081/*)
                 a="${a/http:\/\/localhost:8081/$API_BASE_URL}"
                 ;;
         esac
         args+=("$a")
     done
     "${__REAL_CURL_BIN__}" "${args[@]}"
+}
+
+# Robust API reachability (treat 200/204/404 as reachable)
+api_up() {
+    local base="${API_BASE_URL%/}"
+    local code
+    for p in /health /api/health /; do
+        code=$("${__REAL_CURL_BIN__}" -s -o /dev/null -w '%{http_code}' "${base}${p}" || echo 000)
+        if [ "$code" = "200" ] || [ "$code" = "204" ] || [ "$code" = "404" ]; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 # Make BSD-only 'date -u -r <epoch>' portable on GNU/Linux
@@ -1963,15 +1976,15 @@ start_simulator() {
         OSRM_URL="${OSRM_BASE_URL}"
     fi
 
-    # Ensure backend is up
-    if ! curl -s http://localhost:8081 > /dev/null 2>&1; then
-        print_error "Backend is not running. Run: $0 start"
+    # Ensure backend is up (honor API_BASE_URL and multiple health paths)
+    if ! api_up; then
+        print_error "Backend is not reachable at ${API_BASE_URL}"
         return 1
     fi
 
     # Ensure admin user and get token
     ensure_admin_user
-    LOGIN_RESPONSE=$(curl -s -X POST http://localhost:8081/api/auth/login \
+    LOGIN_RESPONSE=$(curl -s -X POST "$API_BASE_URL/api/auth/login" \
         -H "Content-Type: application/json" \
         -d '{"username":"admin","password":"admin123"}')
     if command -v jq >/dev/null 2>&1; then
