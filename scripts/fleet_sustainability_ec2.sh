@@ -54,7 +54,7 @@ detect_api_base() {
 }
 API_BASE_URL="$(detect_api_base)"
 
-"#" Rewrite any hard-coded localhost:8081 calls to the detected base (with or without trailing slash)
+# Rewrite any hard-coded localhost:8081 calls to the detected base (with or without trailing slash)
 __REAL_CURL_BIN__="$(command -v curl)"
 curl() {
     local args=() a
