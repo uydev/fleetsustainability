@@ -123,7 +123,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate input
-	if err := h.authService.ValidateUsername(registerReq.Username); err != nil {
+    if err := h.authService.ValidateUsername(registerReq.Username); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -133,15 +133,23 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.authService.ValidatePassword(registerReq.Password); err != nil {
+    if err := h.authService.ValidatePassword(registerReq.Password); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	if !models.IsValidRole(registerReq.Role) {
-		http.Error(w, "Invalid role", http.StatusBadRequest)
-		return
-	}
+    // Default role if not provided by client: admin for 'admin' username, else user
+    if registerReq.Role == "" {
+        if registerReq.Username == "admin" {
+            registerReq.Role = "admin"
+        } else {
+            registerReq.Role = "user"
+        }
+    }
+    if !models.IsValidRole(registerReq.Role) {
+        http.Error(w, "Invalid role", http.StatusBadRequest)
+        return
+    }
 
 	// Check if username already exists
 	_, err = h.userCollection.FindUserByUsername(r.Context(), registerReq.Username)

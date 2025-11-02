@@ -248,10 +248,32 @@ func (h *TelemetryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(results)
-	case http.MethodDelete:
-		// Method not allowed for collection-level delete in tests
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	default:
+    case http.MethodDelete:
+        // Allow bulk delete of telemetry (tenant-scoped when available)
+        ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+        defer cancel()
+        // Default: delete all; if tenant present, constrain
+        filter := bson.M{}
+        if claims, ok := middleware.GetUserFromContext(r.Context()); ok && claims.TenantID != "" {
+            filter["tenant_id"] = claims.TenantID
+        }
+        // Prefer direct DeleteMany on the underlying mongo collection when available
+        if mc, ok := h.Collection.(*db.MongoCollection); ok && mc.Collection != nil {
+            if _, err := mc.Collection.DeleteMany(ctx, filter); err != nil {
+                http.Error(w, "Failed to delete telemetry", http.StatusInternalServerError)
+                return
+            }
+        } else {
+            // Fallback to DeleteAll when interface does not expose filtering
+            if err := h.Collection.DeleteAll(ctx); err != nil {
+                http.Error(w, "Failed to delete telemetry", http.StatusInternalServerError)
+                return
+            }
+        }
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusOK)
+        w.Write([]byte(`{"message":"Telemetry cleared"}`))
+    default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
@@ -805,7 +827,7 @@ func (h *VehicleCollectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(results)
 
-	case http.MethodPost:
+    case http.MethodPost:
 		// Create new vehicle
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -890,10 +912,31 @@ func (h *VehicleCollectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 			"message": "Vehicle created successfully",
 		})
 
-	case http.MethodDelete:
-		// Method not allowed for collection-level delete in tests
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+    case http.MethodDelete:
+        // Bulk delete vehicles (tenant-scoped when available)
+        ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+        defer cancel()
+        filter := bson.M{}
+        if claims, ok := middleware.GetUserFromContext(r.Context()); ok && claims.TenantID != "" {
+            filter["tenant_id"] = claims.TenantID
+        }
+        // Use underlying collection for DeleteMany when possible
+        if mc, ok := h.Collection.(*db.MongoCollection); ok && mc.Collection != nil {
+            if _, err := mc.Collection.DeleteMany(ctx, filter); err != nil {
+                http.Error(w, "Failed to delete vehicles", http.StatusInternalServerError)
+                return
+            }
+        } else {
+            // Fallback to interface DeleteAll (no tenant scope)
+            if err := h.Collection.DeleteAll(ctx); err != nil {
+                http.Error(w, "Failed to delete vehicles", http.StatusInternalServerError)
+                return
+            }
+        }
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusOK)
+        json.NewEncoder(w).Encode(map[string]string{"message": "Vehicles cleared"})
+        return
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

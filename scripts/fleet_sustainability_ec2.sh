@@ -2016,13 +2016,14 @@ start_simulator() {
     SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")"
     PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
     
-    # Fallback to known project path if path resolution fails
+    # Fallback to known project path if path resolution fails (prefer REPO_ROOT or HOME)
     if [ ! -f "$PROJECT_DIR/go.mod" ]; then
-        KNOWN_PROJECT_DIR="/Users/yilmazu/Projects/hephaestus-sytems/Fleet-Sustainability"
-        if [ -f "$KNOWN_PROJECT_DIR/go.mod" ]; then
-            print_status "Using known project directory: $KNOWN_PROJECT_DIR"
-            PROJECT_DIR="$KNOWN_PROJECT_DIR"
-        fi
+        for CAND in "$REPO_ROOT" "$HOME/fleetsustainability" "/home/ubuntu/fleetsustainability"; do
+            if [ -n "$CAND" ] && [ -f "$CAND/go.mod" ]; then
+                print_status "Using project directory: $CAND"
+                PROJECT_DIR="$CAND"; break
+            fi
+        done
     fi
     
     print_status "Script directory: $SCRIPT_DIR"
@@ -2102,7 +2103,7 @@ start_simulator() {
         {
             env \
                 SIM_AUTH_TOKEN="$TOKEN" \
-                API_BASE_URL="http://localhost:8081/api" \
+                API_BASE_URL="$API_BASE_URL" \
                 SIM_TICK_SECONDS="$SIM_TICK_SECONDS" \
                 FLEET_SIZE="$FLEET_SIZE" \
                 SIM_SNAP_TO_ROAD="$SIM_SNAP_TO_ROAD" \
@@ -2119,7 +2120,7 @@ start_simulator() {
         {
             env \
                 SIM_AUTH_TOKEN="$TOKEN" \
-                API_BASE_URL="http://localhost:8081/api" \
+                API_BASE_URL="$API_BASE_URL" \
                 SIM_TICK_SECONDS="$SIM_TICK_SECONDS" \
                 FLEET_SIZE="$FLEET_SIZE" \
                 SIM_SNAP_TO_ROAD="$SIM_SNAP_TO_ROAD" \
