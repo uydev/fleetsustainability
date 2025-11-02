@@ -1,6 +1,6 @@
 module github.com/ukydev/fleet-sustainability
 
-go 1.24.5
+go 1.24
 
 require (
 	github.com/eclipse/paho.mqtt.golang v1.4.3
