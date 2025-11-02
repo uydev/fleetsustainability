@@ -201,19 +201,6 @@ func randomLocation() Location {
 }
 
 var authToken string
- var mqttBackoffUntil time.Time
-
-func normalizeMQTTBrokerURL(b string) string {
-    s := strings.TrimSpace(b)
-    if s == "" {
-        return s
-    }
-    if strings.HasPrefix(s, "tcp://") || strings.HasPrefix(s, "ssl://") || strings.HasPrefix(s, "ws://") || strings.HasPrefix(s, "wss://") {
-        return s
-    }
-    // Default to tcp scheme if none provided
-    return "tcp://" + s
-}
 
 func authorizedPost(url string, contentType string, body *bytes.Buffer) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodPost, url, body)
@@ -495,38 +482,27 @@ func sendTelemetry(apiURL string, tele Telemetry) {
 		log.WithError(err).Error("Failed to marshal telemetry")
 		return
 	}
-    if broker := os.Getenv("MQTT_BROKER_URL"); broker != "" && os.Getenv("SIM_USE_MQTT") == "1" {
-        // Respect backoff window to avoid log spam
-        if time.Now().Before(mqttBackoffUntil) {
-            goto HTTP_FALLBACK
-        }
-        broker = normalizeMQTTBrokerURL(broker)
+	if broker := os.Getenv("MQTT_BROKER_URL"); broker != "" && os.Getenv("SIM_USE_MQTT") == "1" {
 		// Publish to MQTT
 		opts := mqtt.NewClientOptions().AddBroker(broker)
 		if u := os.Getenv("MQTT_USERNAME"); u != "" { opts.SetUsername(u) }
 		if p := os.Getenv("MQTT_PASSWORD"); p != "" { opts.SetPassword(p) }
 		opts.SetClientID("fleet-sim-" + tele.VehicleID)
 		client := mqtt.NewClient(opts)
-        if token := client.Connect(); token.Wait() && token.Error() != nil {
-            log.WithError(token.Error()).Error("MQTT connect failed (simulator) - falling back to HTTP; backing off 60s")
-            mqttBackoffUntil = time.Now().Add(60 * time.Second)
-            // fall through to HTTP fallback below
-        } else {
+		if token := client.Connect(); token.Wait() && token.Error() != nil {
+			log.WithError(token.Error()).Error("MQTT connect failed (simulator)")
+			return
+		}
 		topic := os.Getenv("MQTT_TELEMETRY_TOPIC")
 		if topic == "" { topic = "fleet/telemetry" }
-            if token := client.Publish(topic, 1, false, data); token.Wait() && token.Error() != nil {
-                log.WithError(token.Error()).Error("MQTT publish failed - falling back to HTTP; backing off 60s")
-                mqttBackoffUntil = time.Now().Add(60 * time.Second)
-            } else {
+		if token := client.Publish(topic, 1, false, data); token.Wait() && token.Error() != nil {
+			log.WithError(token.Error()).Error("MQTT publish failed")
+		}
 		client.Disconnect(250)
-                mqttBackoffUntil = time.Time{}
 		log.WithFields(log.Fields{"vehicle_id": tele.VehicleID, "topic": topic}).Info("Published telemetry via MQTT")
 		return
-            }
-        }
 	}
 	// Default: send via HTTP
-HTTP_FALLBACK:
 	resp, err := authorizedPost(apiURL+"/telemetry", "application/json", bytes.NewBuffer(data))
 	if err != nil {
 		log.WithError(err).Error("Failed to send telemetry")

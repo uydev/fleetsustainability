@@ -1536,17 +1536,11 @@ func main() {
 	http.Handle("/api/alerts", corsMiddleware(authMiddleware.Authenticate(alertsHandler)))
 
 	// --- MQTT Subscriber (optional) ---
-    mqttURL := os.Getenv("MQTT_BROKER_URL")
-    normalizeMQTT := func(s string) string {
-        if s == "" { return s }
-        if strings.HasPrefix(s, "tcp://") || strings.HasPrefix(s, "ssl://") || strings.HasPrefix(s, "ws://") || strings.HasPrefix(s, "wss://") { return s }
-        return "tcp://" + s
-    }
-    mqttURL = normalizeMQTT(mqttURL)
+	mqttURL := os.Getenv("MQTT_BROKER_URL")
 	mqttTopic := os.Getenv("MQTT_TELEMETRY_TOPIC")
 	if mqttTopic == "" { mqttTopic = "fleet/telemetry" }
 	if mqttURL != "" {
-        opts := mqtt.NewClientOptions().AddBroker(mqttURL)
+		opts := mqtt.NewClientOptions().AddBroker(mqttURL)
 		if u := os.Getenv("MQTT_USERNAME"); u != "" { opts.SetUsername(u) }
 		if p := os.Getenv("MQTT_PASSWORD"); p != "" { opts.SetPassword(p) }
 		opts.SetClientID("fleet-backend-" + strconv.FormatInt(time.Now().UnixNano(), 10))
