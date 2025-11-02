@@ -1,6 +1,6 @@
 [build]
   base = "frontend"
-  publish = "frontend/build"
+  publish = "build"
   command = "npm ci && npm run build"
   # Never skip builds: Netlify skips only when this command exits 0.
   # Using `exit 1` forces a build for every push, keeping GitHub status green.
