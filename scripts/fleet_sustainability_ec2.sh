@@ -1947,14 +1947,16 @@ ensure_admin_user() {
 
 # Helper: get auth token
 get_token() {
-    local resp
-    resp=$(curl -s -m 5 -X POST http://localhost:8081/api/auth/login \
+    local API_BASE LOGIN_URL resp
+    API_BASE=$(detect_api_base)
+    LOGIN_URL="$API_BASE/api/auth/login"
+    resp=$(curl -s -m 5 -X POST "$LOGIN_URL" \
         -H "Content-Type: application/json" \
-        -d '{"username": "admin", "password": "admin123"}') || resp=""
+        -d '{"username":"admin","password":"admin123"}') || resp=""
     if command -v jq >/dev/null 2>&1; then
         TOKEN=$(echo "$resp" | jq -r '.token // empty')
     else
-        TOKEN=$(echo "$resp" | grep -o '"token":"[^"]*"' | cut -d '"' -f4)
+        TOKEN=$(echo "$resp" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
     fi
 }
 
@@ -1968,13 +1970,13 @@ start_simulator() {
     MODE="${1:-local}"
     if [ "$MODE" = "global" ]; then
         SIM_GLOBAL=1
-        # Force global OSRM unless explicitly overridden by user
-        OSRM_URL="${OSRM_BASE_URL:-https://router.project-osrm.org}"
     else
         : "${SIM_GLOBAL:=0}"
-        # Respect any existing OSRM_BASE_URL (e.g., local Monaco)
-        OSRM_URL="${OSRM_BASE_URL}"
     fi
+
+    # Detect backend base each run and ensure it's reachable
+    API_BASE_URL="$(detect_api_base)"
+    print_status "Backend API: $API_BASE_URL"
 
     # Ensure backend is up (honor API_BASE_URL and multiple health paths)
     if ! api_up; then
@@ -2001,6 +2003,16 @@ start_simulator() {
     FLEET_SIZE="${FLEET_SIZE:-1}"
     SIM_TICK_SECONDS="${SIM_TICK_SECONDS:-1}"
     SIM_SNAP_TO_ROAD="${SIM_SNAP_TO_ROAD:-1}"
+    SIM_USE_EXISTING="${SIM_USE_EXISTING:-1}"
+
+    # OSRM preference: try public first, fall back to local Monaco
+    OSRM_URL="${OSRM_BASE_URL:-https://router.project-osrm.org}"
+    CODE=$(command -v curl >/dev/null 2>&1 && curl -s -o /dev/null -w '%{http_code}' "$OSRM_URL/route/v1/driving/0,0;0.1,0.1?overview=false" || echo 000)
+    if [ "$CODE" != "200" ]; then
+        print_warning "Public OSRM not reachable (HTTP $CODE); starting local OSRM..."
+        start_local_osrm || true
+        OSRM_URL="http://localhost:5000"
+    fi
 
     # Stop any running simulator first and clean up
     stop_simulator >/dev/null 2>&1 || true
@@ -2108,7 +2120,7 @@ start_simulator() {
                 FLEET_SIZE="$FLEET_SIZE" \
                 SIM_SNAP_TO_ROAD="$SIM_SNAP_TO_ROAD" \
                 SIM_GLOBAL="$SIM_GLOBAL" \
-                SIM_USE_EXISTING="${SIM_USE_EXISTING:-0}" \
+                SIM_USE_EXISTING="${SIM_USE_EXISTING:-1}" \
                 SIM_EXTRA_CITIES="${SIM_EXTRA_CITIES:-}" \
                 SIM_USE_MQTT="${SIM_USE_MQTT:-1}" \
                 MQTT_BROKER_URL="${MQTT_BROKER_URL:-tcp://localhost:1883}" \
@@ -2125,7 +2137,7 @@ start_simulator() {
                 FLEET_SIZE="$FLEET_SIZE" \
                 SIM_SNAP_TO_ROAD="$SIM_SNAP_TO_ROAD" \
                 SIM_GLOBAL="$SIM_GLOBAL" \
-                SIM_USE_EXISTING="${SIM_USE_EXISTING:-0}" \
+                SIM_USE_EXISTING="${SIM_USE_EXISTING:-1}" \
                 SIM_EXTRA_CITIES="${SIM_EXTRA_CITIES:-}" \
                 SIM_USE_MQTT="${SIM_USE_MQTT:-1}" \
                 MQTT_BROKER_URL="${MQTT_BROKER_URL:-tcp://localhost:1883}" \
