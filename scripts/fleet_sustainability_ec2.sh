@@ -90,6 +90,14 @@ mkdir -p "$OSRM_DIR" 2>/dev/null || true
 # Prefer public OSRM; treat HTTP 400 from OSRM as acceptable
 export OSRM_BASE_URL="${OSRM_BASE_URL:-https://router.project-osrm.org}"
 
+# EC2 defaults so menu options work without manual exports
+export SKIP_COMPOSE="${SKIP_COMPOSE:-1}"            # skip compose by default on EC2
+export NO_LOCAL_OSRM="${NO_LOCAL_OSRM:-0}"          # use OSRM (public or local) by default
+export SIM_GLOBAL="${SIM_GLOBAL:-1}"                # default to global (pairs with public OSRM)
+export FLEET_SIZE="${FLEET_SIZE:-8}"                # default fleet size
+export SIM_TICK_SECONDS="${SIM_TICK_SECONDS:-1}"    # default tick frequency
+export SIM_SNAP_TO_ROAD="${SIM_SNAP_TO_ROAD:-1}"    # snap to roads when OSRM reachable
+
 # Function to check if a port is in use
 check_port() {
     local port=$1
@@ -279,8 +287,12 @@ check_docker_containers() {
     
     echo ""
     print_status "Docker compose status:"
-    cd "$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")/.."
-    docker-compose ps
+    if [ "${SKIP_COMPOSE:-1}" = "0" ]; then
+        cd "$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")/.."
+        docker-compose ps || true
+    else
+        print_status "Compose status skipped (SKIP_COMPOSE=1)"
+    fi
 }
 
 # Function to check application logs
@@ -292,19 +304,29 @@ check_application_logs() {
     
     # Check Docker container logs
     print_status "Backend container logs (last 20 lines):"
-    docker-compose logs --tail=20 app 2>/dev/null || print_warning "Backend container not found or not running"
+    if [ "${SKIP_COMPOSE:-1}" = "0" ]; then
+        docker-compose logs --tail=20 app 2>/dev/null || print_warning "Backend container not found or not running"
+    else
+        print_status "Compose logs skipped (SKIP_COMPOSE=1)"
+    fi
     
     echo ""
     print_status "MongoDB container logs (last 10 lines):"
-    docker-compose logs --tail=10 mongo 2>/dev/null || print_warning "MongoDB container not found or not running"
+    if [ "${SKIP_COMPOSE:-1}" = "0" ]; then
+        docker-compose logs --tail=10 mongo 2>/dev/null || print_warning "MongoDB container not found or not running"
+    fi
     
     echo ""
     print_status "Mongo Express container logs (last 10 lines):"
-    docker-compose logs --tail=10 mongo-express 2>/dev/null || print_warning "Mongo Express container not found or not running"
+    if [ "${SKIP_COMPOSE:-1}" = "0" ]; then
+        docker-compose logs --tail=10 mongo-express 2>/dev/null || print_warning "Mongo Express container not found or not running"
+    fi
 
     echo ""
     print_status "Mosquitto (MQTT) logs (last 20 lines):"
-    docker-compose logs --tail=20 mosquitto 2>/dev/null || print_warning "Mosquitto container not found or not running"
+    if [ "${SKIP_COMPOSE:-1}" = "0" ]; then
+        docker-compose logs --tail=20 mosquitto 2>/dev/null || print_warning "Mosquitto container not found or not running"
+    fi
     
     # Check frontend logs if they exist
     if [ -f "frontend/frontend.log" ]; then
@@ -491,43 +513,58 @@ start_fleet_sustainability() {
         exit 1
     fi
 
-    # Start all services with Docker Compose
+    # Start all services with Docker Compose (optional on EC2)
     print_status "1. Starting all services with Docker Compose (including MQTT)..."
-    cd "$REPO_ROOT"
-    docker-compose up -d
-    if [ $? -eq 0 ]; then
-        print_status "   Docker services started successfully"
+    if [ "${SKIP_COMPOSE:-1}" = "1" ]; then
+        print_warning "   Skipping docker-compose on EC2 (set SKIP_COMPOSE=0 to enable)."
     else
-        print_error "   Failed to start Docker services"
-        exit 1
+        cd "$REPO_ROOT"
+        if docker-compose up -d; then
+            print_status "   Docker services started successfully"
+        else
+            print_error "   Failed to start Docker services"
+            exit 1
+        fi
     fi
 
     # Wait for services to be ready
     print_status "2. Waiting for services to be ready..."
     sleep 10
 
-    # Start local OSRM
-    print_status "5. Starting local OSRM..."
-    start_local_osrm || print_warning "Local OSRM could not be started."
-
-    # Check if backend container is running
-    print_status "3. Checking backend container..."
-    if docker ps | grep -q "fleet-sustainability-app"; then
-        print_status "   Backend container is running"
+    # Start local OSRM (optional). Respect NO_LOCAL_OSRM=1 to skip on EC2
+    if [ "${NO_LOCAL_OSRM:-0}" = "1" ]; then
+        print_warning "5. Skipping local OSRM (NO_LOCAL_OSRM=1)."
     else
-        print_error "   Backend container is not running"
-        print_status "   Checking logs..."
-        docker-compose logs app
-        exit 1
+        print_status "5. Starting local OSRM..."
+        start_local_osrm || print_warning "Local OSRM could not be started."
     fi
 
-    # Check if MongoDB container is running
-    print_status "4. Checking MongoDB container..."
-    if docker ps | grep -q "fleet-sustainability-mongo"; then
-        print_status "   MongoDB container is running"
+    # Check if backend container is running (only if compose was used)
+    print_status "3. Checking backend container..."
+    if [ "${SKIP_COMPOSE:-1}" = "0" ]; then
+        if docker ps | grep -q "fleet-sustainability-app"; then
+            print_status "   Backend container is running"
+        else
+            print_error "   Backend container is not running"
+            print_status "   Checking logs..."
+            docker-compose logs app || true
+            exit 1
+        fi
     else
-        print_error "   MongoDB container is not running"
-        exit 1
+        print_status "   Compose backend check skipped (SKIP_COMPOSE=1)"
+    fi
+
+    # Check Mongo only when compose is enabled
+    print_status "4. Checking MongoDB container..."
+    if [ "${SKIP_COMPOSE:-1}" = "0" ]; then
+        if docker ps | grep -q "fleet-sustainability-mongo"; then
+            print_status "   MongoDB container is running"
+        else
+            print_error "   MongoDB container is not running"
+            exit 1
+        fi
+    else
+        print_status "   MongoDB check skipped (SKIP_COMPOSE=1)"
     fi
 
     # Verify Mosquitto is running
@@ -639,11 +676,15 @@ stop_fleet_sustainability() {
     fi
     print_status "   Frontend stopped"
 
-    # Stop Docker containers
+    # Stop Docker containers (only if compose used)
     print_status "2. Stopping Docker containers..."
-    cd "$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")/.."
-    docker-compose down
-    print_status "   Docker containers stopped"
+    if [ "${SKIP_COMPOSE:-1}" = "0" ]; then
+        cd "$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")/.."
+        docker-compose down || true
+        print_status "   Docker containers stopped"
+    else
+        print_status "   Skipping docker-compose down (SKIP_COMPOSE=1)"
+    fi
 
     # Stop local OSRM
     print_status "3. Stopping local OSRM..."
@@ -667,10 +708,14 @@ ensure_core_services_up() {
     if ! docker ps --format '{{.Names}}' | grep -q '^fleet-sustainability-mongo-express$'; then need=1; fi
     if ! docker ps --format '{{.Names}}' | grep -q '^fleet-sustainability-mosquitto$'; then need=1; fi
     if [ "$need" -eq 1 ]; then
-        print_status "Starting core backend services (no frontend, no local OSRM)..."
-        (cd "$REPO_ROOT" && docker-compose up -d app mongo mosquitto mongo-express) || {
-            print_error "Failed to start core services"; return 1; }
-        sleep 3
+        if [ "${SKIP_COMPOSE:-1}" = "0" ]; then
+            print_status "Starting core backend services (no frontend, no local OSRM)..."
+            (cd "$REPO_ROOT" && docker-compose up -d app mongo mosquitto mongo-express) || {
+                print_error "Failed to start core services"; return 1; }
+            sleep 3
+        else
+            print_status "Skipping core services start (SKIP_COMPOSE=1)"
+        fi
     else
         print_status "Core backend services already running"
     fi
@@ -2208,7 +2253,7 @@ start_local_osrm() {
         return 1
     fi
     cd "$(dirname "$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "${BASH_SOURCE[0]:-$0}")")/.."
-    OSRM_DIR="$(pwd)/build/osrm"
+    OSRM_DIR="${OSRM_DIR:-$(pwd)/build/osrm}"
     mkdir -p "$OSRM_DIR"
     DATA_PBF="$OSRM_DIR/monaco-latest.osm.pbf"
     if [ ! -f "$DATA_PBF" ]; then
@@ -2272,8 +2317,12 @@ auto_fix() {
     fi
 
     if [ "${AUTO_FIX_REBUILD:-0}" -eq 1 ]; then
-        print_status "Building backend image (this may take a few minutes)..."
-        (cd "$REPO_ROOT" && docker-compose build app) || print_warning "Backend image build failed; continuing with existing image"
+        if [ "${SKIP_COMPOSE:-1}" = "0" ]; then
+            print_status "Building backend image (this may take a few minutes)..."
+            (cd "$REPO_ROOT" && docker-compose build app) || print_warning "Backend image build failed; continuing with existing image"
+        else
+            print_warning "Skipping compose build (SKIP_COMPOSE=1)"
+        fi
     fi
     ensure_core_services_up || { print_error "Failed to start core services."; return 1; }
 
